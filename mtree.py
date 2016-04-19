@@ -287,10 +287,16 @@ class VFS_f(object):
                 if __show_checksum_work__:
                     print >>sys.stderr, "JDBG: chksum for F:", self.path
                 self._checksum = _file2hexdigests(self.path)
+                if self._checksum is None: # EPERM
+                    self.size = 0
+                    self._checksum = _data2hexdigests("")
             elif self.islnk:
                 if __show_checksum_work__:
                     print >>sys.stderr, "JDBG: chksum for L:", self.path
                 self._checksum = _link2hexdigests(self.path)
+                if self._checksum is None: # EPERM
+                    self.size = 0
+                    self._checksum = _data2hexdigests("")
             else:
                 if __show_checksum_work__:
                     print >>sys.stderr, "JDBG: chksum for *:", self.path
@@ -656,7 +662,7 @@ def _load(fn):
                 print >>sys.stderr, "Invalid checksum at line %d, in %s\n => %s\n" % (num, fn, line)
                 return None
             sum,val = sline
-                
+
             sum = sum[2:-1]
             if vfs._checksum is None:
                 vfs._checksum = {}
@@ -815,6 +821,8 @@ def u_load(path):
     return root, node
 
 def _cache_read(vfsd, verify_cached="nsm", verbose=False):
+    if verbose:
+        print >>sys.stderr, "Cache: verify:", verify_cached
 
     for vfs in vfsd:
         if isinstance(vfs, VFS_d):
@@ -843,6 +851,9 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                     if verbose:
                         print >>sys.stderr, "Cache: no size:", vfs.path
                     continue
+                else:
+                    if verbose:
+                        print >>sys.stderr, "Cache: size:", vfs.path, vfs.size, cvfs.size
             if verify_cached == "nsm":
                 if vfs.mtime != cvfs.mtime:
                     if verbose:
@@ -1245,7 +1256,7 @@ def _setup_arg_info(opts):
         if ifield == 'data':
             ifields.update(set(['p', 'c', 's']))
             continue
-            
+
         if ifield not in _vc_valid:
             print >>sys.stderr, 'Invalid Info. Field:', 'Supported:', ", ".join(_i_valid)
             sys.exit(1)
