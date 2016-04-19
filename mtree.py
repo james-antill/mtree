@@ -226,12 +226,12 @@ def _lstat_f(filename, ignore_EACCES=False):
             return None
         raise
 
-__show_checksum_work__ = True
+__show_checksum_work__ = False
 
 def _vfs_parent(vfs):
-    if vfs.parent is None:
+    if vfs._parent is None:
         return None
-    parent = vfs.parent()
+    parent = vfs._parent()
     return parent
 
 def _vfs_path(vfs):
@@ -253,9 +253,9 @@ class VFS_f(object):
     def __init__(self, parent, name, _stat=None):
         assert parent is None or isinstance(parent, VFS_d)
 
-        self.parent = None
+        self._parent = None
         if parent is not None:
-            self.parent = weakref.ref(parent)
+            self._parent = weakref.ref(parent)
         self.name = name
 
         self._checksum = None
@@ -950,7 +950,7 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
             else:
                 indent = ' |  ' * (vfs.depth - 1) + ' \\_ '
                 fn = indent + vfs.name
-        if ui and isinstance(vfs, VFS_d) and vfs.parent is not None:
+        if ui and isinstance(vfs, VFS_d) and _vfs_parent(vfs) is not None:
             fn = fn + '/'
         fo.write("%s %s%s %s\n" % (chksum, size_prefix, _muin(vfs.size), fn))
         return
@@ -1298,6 +1298,9 @@ def main():
         prog = os.path.basename(sys.argv[0])
     else:
         prog = "mtree"
+
+    if opts.verbose:
+        __show_checksum_work__ = True
 
     last_matched_chop = opts.chop_diff
 
