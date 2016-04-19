@@ -530,16 +530,53 @@ def find_node(root, path):
         vfs = vfs.nodes[name]
     return vfs
 
-def _walk(vfsd):
-    """ Walk the FS, adding nodes for each. """
+def _term_add_bar(bar_max_length, pc):
+    assert 0 <= pc <= 1
+    blen = bar_max_length
+    bar  = '='*int(blen * pc)
+    if (blen * pc) - int(blen * pc) >= 0.5:
+        bar += '-'
+    return '[%-*.*s]' % (blen, blen, bar)
+
+def _stupid_progress(total, num, text):
+      mnum = len(str(total))
+      left = 79 - (mnum + 1 + mnum + 1 + 3 + 2 + 18 + 1)
+      text = text[:left]
+      perc = float(num) / float(total)
+      textperc = _term_add_bar(16, perc)
+      perc = int(100 * perc)
+      print '%*u/%*u %3u%% %s %-*s\r' % (mnum, total, mnum, num, perc,
+                                         textperc, left, text),
+      sys.stdout.flush()
+def _stupid_progress_end():
+     print ' ' * 79, '\r',
+     sys.stdout.flush()
+
+def _walk_(vfsd, ui, progress):
+    " Internal Worker. "
     for fn in os.listdir(vfsd.path):
         vfs = VFS_f(vfsd, fn)
-        if vfs.isdir: # This requires a stat. real Unix API for "free" file/dir. hint
-            vfs = VFS_d(vfsd, vfs.name, vfs._stat) # FIXME: ugly to avoid stat 2x
-            _walk(vfs)
+        if vfs.isdir: # This requires a stat.
+                      # Use real Unix API for "free" file/dir. hint
+            vfs = VFS_d(vfsd, vfs.name, vfs._stat) # FIXME: hack so no stat 2x
+            vfsd.add(vfs)
+            _walk_(vfs, ui, progress)
         elif not (vfs.islnk or vfs.isreg):
             continue
-        vfsd.add(vfs)
+        else:
+            vfsd.add(vfs)
+        if False and progress is not None:
+            progress[1] += 1
+            _stupid_progress(progress[0].num + 1, progress[1],
+                             vfsd.path.replace('\n', '\\n'))
+def _walk(vfsd, ui=False):
+    """ Walk the FS, adding nodes for each. """
+    progress = None
+    if ui:
+        progress = [vfsd, 0]
+    _walk_(vfsd, ui, progress)
+    if False and progress is not None:
+        _stupid_progress_end()
 
 def _valid_cached_dirs(vfsd, verbose=False):
     ret = True
@@ -1024,6 +1061,26 @@ def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False):
     for vfs in vfsd:
         _prnt_vfsd(fo, vfs, info, ui, tree)
 
+def _walk_checksum_vfsd_(vfsd, ui, progress):
+    " Internal Worker. "
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_checksum_vfsd_(vfs, ui, progress)
+
+    if progress is not None:
+        progress[1] += 1
+        _stupid_progress(progress[0].num + 1, progress[1],
+                         vfsd.path.replace('\n', '\\n'))
+    vfsd.checksums()
+def _walk_checksum_vfsd(vfsd, ui=False):
+    """ Walk the tree and ask for checksums. """
+    progress = None
+    if ui:
+        progress = [vfsd, 0]
+    _walk_checksum_vfsd_(vfsd, ui, progress)
+    if progress is not None:
+        _stupid_progress_end()
+
 def _cmp_chksum_eq(vfs1, vfs2):
     vfs1chk = vfs1.checksums()[primary_checksum]
     vfs2chk = vfs2.checksums()[primary_checksum]
@@ -1381,14 +1438,17 @@ def main():
             names = _path2names(path)
             parent = _names2parent(roots, names)
             name = names[-1]
-            
+
             vfs = _name2vfs(roots, parent, 'd', name)
 
             _jdbg("pre walk")
-            _walk(vfs)
+            _walk(vfs, ui=opts.ui)
             _jdbg("pre cache read")
             _cache_read(vfs, opts.verify_cached, opts.verbose)
 
+            _jdbg("pre walk checksums")
+            _walk_checksum_vfsd(vfs, ui=opts.ui)
+            _jdbg("walked checksums")
             _jdbg("pre prnt vfsd")
             _prnt_vfsd(out, vfs, info=info)
             _jdbg("pre prnt vfs")
