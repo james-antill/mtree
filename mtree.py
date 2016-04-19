@@ -4,8 +4,14 @@ __version__ = '0.1.4'
 __version_info__ = tuple([ int(num) for num in __version__.split('.')])
 
 import ctypes
+import sys
 
-libc_name = "/usr/lib/libc.dylib" # "libc.so.6"
+if False: pass
+
+elif sys.platform == "linux" or sys.platform == "linux2":
+    libc_name = "libc.so.6" # "libc.so.6"
+elif sys.platform == "darwin":
+    libc_name = "/usr/lib/libc.dylib" # "libc.so.6"
 libc = ctypes.CDLL(libc_name)
 libc.memcmp.argtypes = (ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t)
 
@@ -202,7 +208,6 @@ def _valid_checksum_data(checksum_data):
         return False
     return True
 
-import sys
 import os
 import glob
 import stat
