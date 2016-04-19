@@ -392,9 +392,14 @@ class VFS_d(VFS_f):
         self._recalc()
 
     def _recalc(self):
-        self._checksum  = None
-        self._num       = None
-        self._stat_size = None
+        self._checksum     = None
+        self._num          = None
+        self._stat_st_size = None
+
+        parent = _vfs_parent(self)
+        if parent is None:
+            return
+        parent._recalc()
 
     def add(self, vfs):
         # assert vfs.parent is self
@@ -427,9 +432,9 @@ class VFS_d(VFS_f):
     # @property
     # def size(self):
     def _getSize(self):
-        if self._stat_size is None:
-            self._stat_size = _vfsd_size(self)
-        return self._stat_size
+        if self._stat_st_size is None:
+            self._stat_st_size = _vfsd_size(self)
+        return self._stat_st_size
 
     @property
     def num(self):
@@ -672,16 +677,16 @@ def _load(fn):
             if False:
                 setattr(vfs, "size", int(line[3:]))
             elif False:
-                vfs._stat_size = int(line[3:])
+                vfs._stat_st_size = int(line[3:])
             elif False:
                 val = line[3:]
                 if not val.isdigit():
                     print >>sys.stderr, "Invalid size line %d, in %s\n => %s" % (num, fn, sline)
                     return None
-                vfs._stat_size = int(val)
+                vfs._stat_st_size = int(val)
             elif True:
                 try:
-                    vfs._stat_size = int(line[3:])
+                    vfs._stat_st_size = int(line[3:])
                 except ValueError:
                     print >>sys.stderr, "Invalid size line %d, in %s\n => %s" % (num, fn, sline)
                     return None
