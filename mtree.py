@@ -604,7 +604,9 @@ def find_node(root, path):
     return vfs
 
 def _term_add_bar(bar_max_length, pc):
-    assert 0 <= pc <= 1
+    if pc < 0: pc = 0
+    if pc > 1: pc = 1
+
     blen = bar_max_length
     bar  = '='*int(blen * pc)
     if (blen * pc) - int(blen * pc) >= 0.5:
@@ -612,13 +614,14 @@ def _term_add_bar(bar_max_length, pc):
     return '[%-*.*s]' % (blen, blen, bar)
 
 def _stupid_progress(total, num, text):
-      mnum = len(str(total))
+      ui_tot = _ui_num(total)
+      mnum = len(ui_tot)
       left = 79 - (mnum + 1 + mnum + 1 + 3 + 2 + 18 + 1)
       text = text[:left]
       perc = float(num) / float(total)
       textperc = _term_add_bar(16, perc)
       perc = int(100 * perc)
-      print '%*u/%*u %3u%% %s %-*s\r' % (mnum, total, mnum, num, perc,
+      print '%*s/%*s %3u%% %s %-*s\r' % (mnum, ui_tot, mnum, _ui_num(num), perc,
                                          textperc, left, text),
       sys.stdout.flush()
 def _stupid_progress_end():
@@ -1149,22 +1152,48 @@ def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False):
     for vfs in vfsd:
         _prnt_vfsd(fo, vfs, info, ui, tree)
 
+def _walk_checksum_vfsd_calc(vfsd, progress):
+    " Internal Worker. "
+    if vfsd._checksum is not None:
+        return
+
+    progress[0].num += 1
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_checksum_vfsd_calc(vfs, progress)
+    else:
+        progress[0].size += vfsd.size
+
 def _walk_checksum_vfsd_(vfsd, ui, progress):
     " Internal Worker. "
+    if vfsd._checksum is not None:
+        return
+
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
             _walk_checksum_vfsd_(vfs, ui, progress)
 
     if progress is not None:
-        progress[1] += 1
-        _stupid_progress(progress[0].num + 1, progress[1],
+        if isinstance(vfsd, VFS_d):
+            progress[1] += 1
+        else:
+            progress[1] += 1 + vfsd.size
+        tot = progress[0].num + progress[0].size
+        _stupid_progress(tot, progress[1],
                          vfsd.path.replace('\n', '\\n'))
     vfsd.checksums()
 def _walk_checksum_vfsd(vfsd, ui=False):
     """ Walk the tree and ask for checksums. """
     progress = None
     if ui:
-        progress = [vfsd, 0]
+        if False:
+            progress = [vfsd, 0]
+        else:
+            fake_vfsd = lambda x: x
+            fake_vfsd.num  = 0
+            fake_vfsd.size = 0
+            progress = [fake_vfsd, 0]
+        _walk_checksum_vfsd_calc(vfsd, progress)
     _walk_checksum_vfsd_(vfsd, ui, progress)
     if progress is not None:
         _stupid_progress_end()
