@@ -1,7 +1,7 @@
 #! /usr/bin/python -tt
 
 import os
+import sys
 
-print os.stat(".")
-os.stat_float_times(False)
-print os.stat(".")
+print "mtime =",
+print os.stat(sys.argv[1]).st_mtime

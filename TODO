@@ -1,6 +1,5 @@
-BUG: EPERM on listdir
-BUG: cache data looks at FS, if not available. Eg. stat
 mtime nsec
+no saved atime, so .mtree files are identical.
 mtree (modes/uid/etc.)
 relative roots, in snap, kind of like summary? For input absolute paths.
 cut / prune / yank / whatever

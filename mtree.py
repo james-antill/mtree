@@ -225,8 +225,19 @@ def _lstat_f(filename, ignore_EACCES=False):
         if ignore_EACCES and e.errno == errno.EACCES:
             return None
         raise
+def _listdir_f(dirname, ignore_EACCES=False):
+    """ Call os.listdir(), don't die if the dir. isn't readable. Returns []. """
+    try:
+        return os.listdir(dirname)
+    except OSError, e:
+        if e.errno in (errno.ENOENT, errno.ENOTDIR, errno.EPERM):
+            return []
+        if ignore_EACCES and e.errno == errno.EACCES:
+            return []
+        raise
 
 __show_checksum_work__ = False
+__show_stat_work__ = False
 
 def _vfs_parent(vfs):
     if vfs._parent is None:
@@ -250,7 +261,7 @@ def _vfs_depth(vfs):
     return _vfs_depth(parent) + 1
 
 class VFS_f(object):
-    def __init__(self, parent, name, _stat=None):
+    def __init__(self, parent, name, _stat=None, readonly=False):
         assert parent is None or isinstance(parent, VFS_d)
 
         self._parent = None
@@ -258,10 +269,31 @@ class VFS_f(object):
             self._parent = weakref.ref(parent)
         self.name = name
 
+        self.readonly  = readonly
+
         self._checksum = None
-        self._stat = _stat
-        self._path = None
-        self._depth = None
+        self._stat     = _stat
+        self._path     = None
+        self._depth    = None
+
+        self._stat_st_size  = None
+        self._stat_st_mtime = None
+
+        self._stat_st_mode  = None
+        self._stat_st_ctime = None
+        self._stat_st_atime = None
+        self._stat_st_nlink = None
+
+        self._stat_st_dev   = None
+        self._stat_st_ino   = None
+        self._stat_st_uid   = None
+        self._stat_st_gid   = None
+
+    def _parent_recalc(self):
+        parent = _vfs_parent(self)
+        if parent is None:
+            return
+        parent._recalc()
 
     @property
     def path(self):
@@ -282,6 +314,11 @@ class VFS_f(object):
 
     def checksums(self):
         if self._checksum is None:
+            if self.readonly:
+                return {}
+
+            self._parent_recalc()
+
             if False: pass
             elif self.isreg:
                 if __show_checksum_work__:
@@ -307,19 +344,38 @@ class VFS_f(object):
         self._stat = None
         if mem is not None and hasattr(self, "_stat_" + mem):
             delattr(self, "_stat_" + mem)
-    def _getStatVal(self, mem, zero=0):
-        if hasattr(self, "_stat_" + mem):
-            return getattr(self, "_stat_" + mem)
+    def _getStatStat(self):
         if self._stat is None:
+            if self.readonly:
+                return None
+            if __show_stat_work__:
+                print >>sys.stderr, "JDBG: stat for *:", mem, self.path
+
+            self._parent_recalc()
+
             self._stat = _lstat_f(self.path)
-            if self._stat is None:
-                return zero
-            self.exists = True
+        return self._stat # Can still be None
+    def _getStatVal(self, mem, zero=0):
+        _res = getattr(self, "_stat_" + mem)
+        if _res is not None:
+            return _res
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return zero
         return getattr(self._stat, mem)
     def _setStatVal(self, mem, val):
         setattr(self, "_stat_" + mem, val)
     def _getSize(self): # So we can override it
-        return self._getStatVal("st_size")
+        if False:
+            return self._getStatVal("st_size")
+        if self._stat_st_size is not None:
+            return self._stat_st_size
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return 0
+        return _stat.st_size
     size = property(fget=lambda self:     self._getSize(),
                     fset=lambda self,val: self._setStatVal("st_size", val),
                     fdel=lambda self:     self._delStatVal("st_size"),
@@ -332,7 +388,15 @@ class VFS_f(object):
                         fset=lambda self,val: self._setStatVal("st_ctime", val),
                         fdel=lambda self:     self._delStatVal("st_ctime"),
                         doc="Change time of the file (cached)")
-    mtime = property(fget=lambda self: int(self._getStatVal("st_mtime")),
+    def _getStatMtime(self): # For speed?
+        if self._stat_st_mtime is not None:
+            return int(self._stat_st_mtime)
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return 0
+        return int(_stat.st_mtime)
+    mtime = property(fget=lambda self:     self._getStatMtime(),
                      fset=lambda self,val: self._setStatVal("st_mtime", val),
                      fdel=lambda self:     self._delStatVal("st_mtime"),
                      doc="Modified time of the file (cached)")
@@ -386,20 +450,25 @@ def _vfsd_num(vfsd):
     return num
 
 class VFS_d(VFS_f):
-    def __init__(self, parent, name, _stat=None):
-        VFS_f.__init__(self, parent, name, _stat)
+    def __init__(self, parent, name, _stat=None, readonly=False):
+        VFS_f.__init__(self, parent, name, _stat, readonly)
         self.nodes = {}
-        self._recalc()
 
-    def _recalc(self):
         self._checksum     = None
         self._num          = None
         self._stat_st_size = None
 
-        parent = _vfs_parent(self)
-        if parent is None:
+    def _recalc(self):
+        if (self._checksum     is None and
+            self._num          is None and
+            self._stat_st_size is None):
             return
-        parent._recalc()
+
+        self._checksum     = None
+        self._num          = None
+        self._stat_st_size = None
+
+        self._parent_recalc()
 
     def add(self, vfs):
         # assert vfs.parent is self
@@ -418,27 +487,30 @@ class VFS_d(VFS_f):
         if self._checksum is None:
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self.path
+            self._parent_recalc()
             ret = Checksums(_available_checksums)
-            self._num = 0
             for vfs in self:
-                self._num += 1
                 ret.update(vfs.name)
                 ret.update(' ')
                 ret.update_dict(vfs.checksums())
                 ret.update('\n')
             self._checksum = ret.hexdigests()
+            if __show_checksum_work__:
+                print >>sys.stderr, "JDBG: chksum for D:", self._checksum
         return self._checksum
 
     # @property
     # def size(self):
     def _getSize(self):
         if self._stat_st_size is None:
+            self._parent_recalc()
             self._stat_st_size = _vfsd_size(self)
         return self._stat_st_size
 
     @property
     def num(self):
         if self._num is None:
+            self._parent_recalc()
             self._num = _vfsd_num(self)
         return self._num
 
@@ -450,20 +522,20 @@ def _path2names(path):
         names[0] = '/'
     return names
 
-def _names2parent(roots, names):
+def _names2parent(roots, names, readonly=False):
     parent = None
     for name in names[:-1]:
         if parent is None:
             if name not in roots:
-                roots[name] = VFS_d(None, name)
+                roots[name] = VFS_d(None, name, readonly=readonly)
             parent = roots[name]
         else:
             if name not in parent.nodes:
-                parent.nodes[name] = VFS_d(parent, name)
+                parent.nodes[name] = VFS_d(parent, name, readonly=readonly)
             parent = parent.nodes[name]
     return parent
 
-def _name2vfs(roots, parent, T, name):
+def _name2vfs(roots, parent, T, name, readonly=False):
     vfs = None
     if parent is None:
         if name in roots:
@@ -474,11 +546,13 @@ def _name2vfs(roots, parent, T, name):
 
     if vfs is not None: pass
     elif T == 'd':
-        vfs = VFS_d(parent, name)
+        vfs = VFS_d(parent, name, readonly=readonly)
     elif T == 'f':
-        vfs = VFS_f(parent, name)
+        vfs = VFS_f(parent, name, readonly=readonly)
     elif T == 'l':
-        vfs = VFS_f(parent, name)
+        vfs = VFS_f(parent, name, readonly=readonly)
+    else:
+        assert False, "Bad type."
 
     if parent is None:
         roots[name] = vfs
@@ -554,7 +628,7 @@ def _stupid_progress_end():
 
 def _walk_(vfsd, ui, progress):
     " Internal Worker. "
-    for fn in os.listdir(vfsd.path):
+    for fn in _listdir_f(vfsd.path):
         vfs = VFS_f(vfsd, fn)
         if vfs.isdir: # This requires a stat.
                       # Use real Unix API for "free" file/dir. hint
@@ -596,7 +670,7 @@ def _valid_cached_dirs(vfsd, verbose=False):
             if not _valid_cached_dirs(vfs):
                 ret = False
     if not ret:
-        vfsd._recalc()    
+        vfsd._recalc()
     return ret
 
 _cached = {}
@@ -623,16 +697,16 @@ def _load_p(fn, num, roots, ifo, line):
         return None
 
     names = _path2names(path)
-    parent = _names2parent(roots, names)
+    parent = _names2parent(roots, names, readonly=True)
     name = names[-1]
-    vfs = _name2vfs(roots, parent, T, name)
+    vfs = _name2vfs(roots, parent, T, name, readonly=True)
 
     if vfs.name not in _cached:
         _cached[vfs.name] = []
     _cached[vfs.name].append(vfs)
     return vfs
 
-def _load(fn):
+def _load(fn, data_only=False):
     num = 1
     fo = open(fn)
 
@@ -731,18 +805,21 @@ def _load(fn):
             elif not _read_int2(line, vfs, "size"):
                 return None
 
-        elif line[0] == 'N' and line[1] == 'u' and line[2] == 'm' and line[3] == ':':
-            pass
-
         elif line[0] == 'M' and line[1] == 'T' and line[2] == ':':
             try:
-                vfs._stat_mtime = int(line[4:])
+                vfs._stat_st_mtime = int(line[4:])
             except ValueError:
                 print >>sys.stderr, "Invalid mtime line %d, in %s\n => %s" % (num, fn, sline)
                 return None
             if True: continue
             if not _read_int(line, vfs, "mtime"):
                 return None
+
+        elif data_only:
+            continue
+
+        elif line[0] == 'N' and line[1] == 'u' and line[2] == 'm' and line[3] == ':':
+            pass
 
         elif line[0] == 'U' and line[1] == ':':
             try:
@@ -796,7 +873,7 @@ def _load(fn):
 
         elif line[0] == 'M' and line[1] == 'O' and line[2] == ':':
             try:
-                vfs._stat_st_mode = int(line[4:])
+                vfs._stat_st_mode = int(line[4:], 8)
             except ValueError:
                 print >>sys.stderr, "Invalid mode line %d, in %s\n => %s" % (num, fn, sline)
                 return None
@@ -829,8 +906,8 @@ def _load(fn):
 
     return roots
 
-def _1root_load(path):
-    roots = _load(path)
+def _1root_load(path, data_only=False):
+    roots = _load(path, data_only)
     if not roots:
         print >>sys.stderr, "No roots (%s)\n" % path
         return None
@@ -842,17 +919,17 @@ def _1root_load(path):
     assert False
     return None
 
-def u_load(path):
+def u_load(path, data_only=False):
     off = path.find('//')
     if off == -1:
-        root = _1root_load(path)
+        root = _1root_load(path, data_only)
         if root is None:
             return None
         return root, root
     node_path = path[off+2:]
     path = path[:off]
 
-    root = _1root_load(path)
+    root = _1root_load(path, data_only)
     if root is None:
         return None
 
@@ -877,13 +954,15 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                 print >>sys.stderr, "Cache: Not found:", len(vfs.name), vfs.name, vfs.name
             continue
 
+        found = None
         isd = isinstance(vfs, VFS_d)
         for cvfs in _cached[vfs.name]:
             if isd != isinstance(cvfs, VFS_d):
                 if verbose:
                     print >>sys.stderr, "Cache: dir. vs file:", vfs.path
                 continue
-            if verify_cached in ("ns", "nsm"):
+            if verify_cached in ("ns", "ps", "nsm", "psm",
+                                 "ism", "nism", "pism"):
                 if isd: # Dirs.
                     if len(vfs.nodes) != len(cvfs.nodes) or vfs.num != cvfs.num:
                         if verbose:
@@ -896,12 +975,12 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                 else:
                     if verbose:
                         print >>sys.stderr, "Cache: size:", vfs.path, vfs.size, cvfs.size
-            if verify_cached == "nsm":
+            if verify_cached in ("nsm", "psm", "ism", "nism", "pism"):
                 if vfs.mtime != cvfs.mtime:
                     if verbose:
                         print >>sys.stderr, "Cache: no mtime:", vfs.path
                     continue
-            if verify_cached in ("i", "ni", "pi"):
+            if verify_cached in ("ism", "nism", "pism"):
                 if vfs.st_dev != cvfs.st_dev:
                     if verbose:
                         print >>sys.stderr, "Cache: no dev:", vfs.path
@@ -910,7 +989,7 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                     if verbose:
                         print >>sys.stderr, "Cache: no ino:", vfs.path
                     continue
-            if verify_cached == "pi":
+            if verify_cached in ("ps", "psm", "pism"):
                 if vfs.path != cvfs.path:
                     if verbose:
                         print >>sys.stderr, "Cache: no path:", vfs.path
@@ -923,9 +1002,18 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                     break
             else:
                 if verbose:
-                    print >>sys.stderr, "Cache: found:", vfs.path
-                vfs._checksum = cvfs.checksums()
-            break
+                    print >>sys.stderr, "Cache: found:", vfs.path, cvfs.path
+                if found is not None:
+                    if found.checksums() == cvfs.checksums():
+                        continue
+                    if verbose:
+                        print >>sys.stderr, "Cache: multi matches:", found, cvfs
+                    found = None
+                    break
+                found = cvfs
+
+        if found is not None:
+            vfs._checksum = found.checksums()
 
 def _ui_time(tm, nospc=False):
     if nospc:
@@ -1017,6 +1105,7 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
     elif vfs.isreg:
         fo.write("%s %s %d %s\n" % ('P:', 'f', len(vfs.path), vfs.path))
     else:
+        print "JDBG:", "BAD:", vfs.path, vfs.st_mode
         return
 
     if 'name' in info:
@@ -1228,6 +1317,12 @@ def _setup_argp(all_cmds):
     argp.add_option('--ui-checksum-length',
             default=None, type='int',
             help='print in human readable format')
+    argp.add_option('--no-auto-loading', '--no-automatic-loading',
+            dest="auto_load", action='store_false',
+            help='No automatic loading when snapshotting to dirs.')
+    argp.add_option('--auto-loading', '--automatic-loading',
+            dest="auto_load", action='store_true', default=True,
+            help='automatic loading when snapshotting to dirs.')
     argp.add_option('-c',
             '--checksums', default="default",
             help='what checksums to use')
@@ -1287,12 +1382,13 @@ def _setup_arg_checksum(opts):
         primary_checksum = nchks[0]
 
 def _setup_arg_vc(opts):
-    _vc_valid = ("all", "data", "default", "ns", "nsm", "i", "ni", "pi")
+    _vc_valid = ("all", "data", "default", "ns", "ps", "nsm", "psm",
+                 "ism", "nism", "pism")
     if opts.verify_cached not in _vc_valid:
-        print >>sys.stderr, 'Invalid Verify:', 'Supported:', ", ".join(_vc_valid)
+        print >>sys.stderr, 'Invalid Verify:', 'Supported:',", ".join(_vc_valid)
         sys.exit(1)
     if opts.verify_cached == "all":
-        opts.verify_cached = "pi"
+        opts.verify_cached = "pism"
     if opts.verify_cached == "data":
         opts.verify_cached = "ns"
     if opts.verify_cached == "default":
@@ -1329,13 +1425,16 @@ def _setup_arg_info(opts):
 def _setup_arg_cache_load(opts):
     _cached_roots = {}
     if opts.load_mtree:
+        data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
+
         for fn in opts.load_mtree:
-            root = u_load(fn)
+            root = u_load(fn, data_only)
             if root is None:
                 continue
-            _cached_roots[fn] = root
+            rroot,root = root
+            _cached_roots[fn] = rroot
         if opts.verbose:
-            print >>sys.stderr, "Loaded:", len(roots), len(_cached_roots), len(_cached)
+            print >>sys.stderr, "Loaded:", root.num, len(_cached_roots), len(_cached)
 
     return _cached_roots
 
@@ -1373,7 +1472,14 @@ def main():
         prog = "mtree"
 
     if opts.verbose:
+        global __show_checksum_work__
         __show_checksum_work__ = True
+        global __show_stat_work__
+        __show_stat_work__ = True
+        global _prnt_diff_dir_mod
+        global _prnt_diff_reg_mod
+        _prnt_diff_dir_mod = False
+        _prnt_diff_reg_mod = False
 
     last_matched_chop = opts.chop_diff
 
@@ -1406,16 +1512,23 @@ def main():
                     'u', 'g', 'd', 'i', 'l', 'mo', 'at', 'ct'])
 
         snap_fn = cmds[1]
-        if os.path.isdir(snap_fn):
+        if not os.path.isdir(snap_fn):
+            if opts.auto_load and not snap_fn.endswith(".mtree"):
+                snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
+        else:
             _jdbg("auto snap")
-            old_snaps = os.listdir(snap_fn)
-            old_snaps = [snap for snap in old_snaps if snap.endswith(".mtree")]
+            snap_base = os.path.basename(snap_fn)
+            old_snaps = []
+            if opts.auto_load:
+                old_snaps = os.listdir(snap_fn)
+            old_snaps = [snap for snap in old_snaps
+                         if snap.startswith(snap_base) and
+                            snap.endswith(".mtree")]
             if old_snaps:
                 last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
-                _jdbg("pre auto load")
+                print "Loading snapshot:", last_snap
                 auto_cached_root = u_load(snap_fn + "/" + last_snap)
                 _jdbg("auto loaded")
-            snap_base = os.path.basename(snap_fn)
             snap_fn += "/"
             snap_fn += snap_base
             snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
@@ -1460,7 +1573,7 @@ def main():
             sys.exit(1)
 
         for fn in cmds[1:]:
-            root = u_load(fn)
+            root = u_load(fn, data_only=True)
             if root is None:
                 sys.exit(1)
             # Need to keep real root around due to GC.
@@ -1476,12 +1589,15 @@ def main():
             print >>sys.stderr, "Format: %s %s <filename> [...]" % (prog, cmds[0])
             sys.exit(1)
 
+        data_only = False
         if cmd in ('list', 'tree'):
+            if opts.verify_cached in ("ns", "ps", "nsm", "psm"):
+                data_only = True
             ifields = False
 
         _jdbg("beg")
         for fn in cmds[1:]:
-            root = u_load(fn)
+            root = u_load(fn, data_only)
             _jdbg("loaded")
             if root is None:
                 sys.exit(1)
@@ -1509,11 +1625,14 @@ def main():
         else:
             roots1 = {}
             roots2 = {}
-            roots1[1] = u_load(cmds[1])
+            data_only = False
+            if opts.verify_cached in ("ns", "ps", "nsm", "psm"):
+                data_only = True
+            roots1[1] = u_load(cmds[1], data_only)
             _jdbg("load 1")
             if roots1[1] is None:
                 sys.exit(1)
-            roots2[2] = u_load(cmds[2])
+            roots2[2] = u_load(cmds[2], data_only)
             _jdbg("load 2")
             if roots2[2] is None:
                 sys.exit(1)
