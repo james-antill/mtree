@@ -574,10 +574,9 @@ def find_node(root, path):
     if root is None:
         return None
 
-    names = path.split('/')
-    if names[0] == '':
-        assert path[0] == '/'
-        names[0] = '/'
+    names = [p for p in path.split('/') if p != '']
+    if path[0] == '/':
+        names.insert(0, '/') # Removed due to magic above.
 
     if names[0] == root.name:
         names = names[1:]
