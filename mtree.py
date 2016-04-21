@@ -1152,6 +1152,20 @@ def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False):
     for vfs in vfsd:
         _prnt_vfsd(fo, vfs, info, ui, tree)
 
+def _walk_checksum_vfsd_prop(vfsd):
+    " Internal Worker. "
+    ret = False
+    if vfsd._checksum is None:
+        ret = True
+
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            if _walk_checksum_vfsd_prop(vfs):
+                ret = True
+    if ret:
+        vfsd._parent_recalc()
+    return ret
+
 def _walk_checksum_vfsd_calc(vfsd, progress):
     " Internal Worker. "
     if vfsd._checksum is not None:
@@ -1184,6 +1198,7 @@ def _walk_checksum_vfsd_(vfsd, ui, progress):
     vfsd.checksums()
 def _walk_checksum_vfsd(vfsd, ui=False):
     """ Walk the tree and ask for checksums. """
+    _walk_checksum_vfsd_prop(vfsd)
     progress = None
     if ui:
         if False:
