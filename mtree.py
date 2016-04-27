@@ -710,7 +710,11 @@ def _load_p(fn, num, roots, ifo, line):
 
 def _load(fn, data_only=False):
     num = 1
-    fo = open(fn)
+    try:
+        fo = open(fn)
+    except IOError, e:
+            print >>sys.stderr, "open(%s): %s" % (fn, e)
+            return None
 
     line = fo.readline()
     if line != "mtree-file-0.1\n":
