@@ -718,13 +718,17 @@ def _load_p(fn, num, roots, ifo, line):
     _cached[vfs.name].append(vfs)
     return vfs
 
-def _load(fn, data_only=False):
+import gzip
+def _load(fn, data_only=False, gunzip=True):
     num = 1
     try:
-        fo = open(fn)
+        if fn.endswith(".gz"):
+            fo = gzip.open(fn)
+        else:
+            fo = open(fn)
     except IOError, e:
-            print >>sys.stderr, "open(%s): %s" % (fn, e)
-            return None
+        print >>sys.stderr, "open(%s): %s" % (fn, e)
+        return None
 
     line = fo.readline()
     if line != "mtree-file-0.1\n":
