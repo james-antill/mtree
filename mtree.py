@@ -1561,6 +1561,7 @@ def main():
 
     _jdbg("cmds")
 
+    errcode = 0
     done = False
     if False: pass
 
@@ -1636,12 +1637,16 @@ def main():
         for fn in cmds[1:]:
             root = u_load(fn, data_only=True)
             if root is None:
-                sys.exit(1)
+                errcode = 1
+                done = True
+                if done: print ''
+                continue
             # Need to keep real root around due to GC.
             rroot,root = root
             _jdbg("post load")
 
             if done: print ''
+            print "Filename:", fn
             _ui_prnt_root(_root2useful(root), ui=opts.ui)
             done = True
 
@@ -1661,7 +1666,10 @@ def main():
             root = u_load(fn, data_only)
             _jdbg("loaded")
             if root is None:
-                sys.exit(1)
+                errcode = 1
+                done = True
+                if done: print ''
+                continue
             # Need to keep real root around due to GC.
             rroot,root = root
 
@@ -1742,17 +1750,22 @@ def main():
 
         for fn in cmds[1:]:
             roots = _load(fn)
-            print "JDBG:", roots
+            if opts.verbose:
+                print >>sys.stderr, "JDBG:", roots
             if roots is None:
-                sys.exit(1)
+                errcode = 1
+                done = True
+                if done: print ''
+                continue
 
             for root in sorted(roots, cmp=_fcmp):
                 root = roots[root]
-                if _valid_cached_dirs(root, True): # opts.verbose):
+                print "Filename:", fn
+                if _valid_cached_dirs(root, verbose=True): # opts.verbose):
                     continue
                 if done: print ''
                 # FIXME: Print diff?
-                _ui_prnt_root(_root2useful(root), ui=opts.ui)
+                _ui_prnt_root(_root2useful(root), ui=opts.ui, prefix="Failed root:")
                 done = True
 
     elif cmd == 'help':
@@ -1761,6 +1774,7 @@ def main():
 
     else:
         assert False, "Should be checked above, in all_cmds"       
+    sys.exit(errcode)
 
 if __name__ == "__main__":
     main()
