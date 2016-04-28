@@ -468,11 +468,6 @@ class VFS_d(VFS_f):
         self._stat_st_size = None
 
     def _recalc(self):
-        if (self._checksum     is None and
-            self._num          is None and
-            self._stat_st_size is None):
-            return
-
         self._checksum     = None
         self._num          = None
         self._stat_st_size = None
