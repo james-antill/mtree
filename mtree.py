@@ -449,6 +449,15 @@ def _vfsd_num(vfsd):
         num += 1
     return num
 
+def _vfsd_checksum(vfsd):
+    ret = Checksums(_available_checksums)
+    for vfs in vfsd:
+        ret.update(vfs.name)
+        ret.update(' ')
+        ret.update_dict(vfs.checksums())
+        ret.update('\n')
+    return ret.hexdigests()
+
 class VFS_d(VFS_f):
     def __init__(self, parent, name, _stat=None, readonly=False):
         VFS_f.__init__(self, parent, name, _stat, readonly)
@@ -488,13 +497,7 @@ class VFS_d(VFS_f):
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self.path
             self._parent_recalc()
-            ret = Checksums(_available_checksums)
-            for vfs in self:
-                ret.update(vfs.name)
-                ret.update(' ')
-                ret.update_dict(vfs.checksums())
-                ret.update('\n')
-            self._checksum = ret.hexdigests()
+            self._checksum = _vfsd_checksum(self)
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self._checksum
         return self._checksum
@@ -656,23 +659,35 @@ def _walk(vfsd, ui=False):
 
 def _valid_cached_dirs(vfsd, verbose=False):
     ret = True
+
     size = _vfsd_size(vfsd)
     if size != vfsd.size:
         if verbose:
             print >>sys.stderr, "Err: Dir. %s failed size check: %u vs. %u" % (vfsd.name, size, vfsd.size)
         ret = False
+
     num = _vfsd_num(vfsd)
     if num != vfsd.num:
         if verbose:
             print >>sys.stderr, "Err: Dir. %s failed num check: %u vs. %u" % (vfsd.name, len(vfsd.nodes), vfsd.num)
         ret = False
 
+    chks = _vfsd_checksum(vfsd)
+    # Saved version can have different checksums.
+    for sumkey in chks:
+        if sumkey not in vfsd.checksums():
+            continue
+        if chks[sumkey] != vfsd.checksums()[sumkey]:
+            if verbose:
+                msg = "Err: Dir. %s failed checksum-%s check:\n => %s\n => %s"
+                msg = msg % (vfsd.name, sumkey, chks[sumkey], vfsd.checksums()[sumkey])
+                print >>sys.stderr, msg
+            ret = False
+
     for vfs in vfsd:
         if isinstance(vfs, VFS_d):
-            if not _valid_cached_dirs(vfs):
+            if not _valid_cached_dirs(vfs, verbose=verbose):
                 ret = False
-    if not ret:
-        vfsd._recalc()
     return ret
 
 _cached = {}
