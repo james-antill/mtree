@@ -1585,7 +1585,7 @@ def main():
                 old_snaps = os.listdir(snap_fn)
             old_snaps = [snap for snap in old_snaps
                          if snap.startswith(snap_base) and
-                            snap.endswith(".mtree")]
+                            (snap.endswith(".mtree") or snap.endswith(".mtree.gz"))]
             if old_snaps:
                 last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
                 print "Loading snapshot:", last_snap
