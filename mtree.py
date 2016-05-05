@@ -1142,8 +1142,11 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
         fo.write("%s %s %d %s\n" % ('P:', 'l', len(vfs.path), vfs.path))
     elif vfs.isreg:
         fo.write("%s %s %d %s\n" % ('P:', 'f', len(vfs.path), vfs.path))
+    elif not vfs.st_mode:
+        print >>sys.stderr, "Skip:", vfs.path
+        return
     else:
-        print "JDBG:", "BAD:", vfs.path, vfs.st_mode
+        print >>sys.stderr, "JDBG:", "BAD:", vfs.path, vfs.st_mode
         return
 
     if 'name' in info:
