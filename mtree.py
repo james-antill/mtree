@@ -243,6 +243,7 @@ def _vfs_parent(vfs):
     if vfs._parent is None:
         return None
     parent = vfs._parent()
+    assert parent is None or isinstance(parent, VFS_d)
     return parent
 
 def _vfs_path(vfs):
@@ -261,6 +262,20 @@ def _vfs_depth(vfs):
     return _vfs_depth(parent) + 1
 
 class VFS_f(object):
+    __slots__ = ['_parent', 'name', 'readonly',
+                 '_checksum', '_stat', '_path', '_depth',
+                 '_stat_st_size',
+                 '_stat_st_mtime',
+                 '_stat_st_mode',
+                 '_stat_st_ctime',
+                 '_stat_st_atime',
+                 '_stat_st_nlink',
+                 '_stat_st_dev',
+                 '_stat_st_ino',
+                 '_stat_st_uid',
+                 '_stat_st_gid',
+                 ]
+
     def __init__(self, parent, name, _stat=None, readonly=False):
         assert parent is None or isinstance(parent, VFS_d)
 
@@ -459,13 +474,16 @@ def _vfsd_checksum(vfsd):
     return ret.hexdigests()
 
 class VFS_d(VFS_f):
+    __slots__ = ['nodes', '_num', '__weakref__']
+
     def __init__(self, parent, name, _stat=None, readonly=False):
         VFS_f.__init__(self, parent, name, _stat, readonly)
+
         self.nodes = {}
 
-        self._checksum     = None
         self._num          = None
-        self._stat_st_size = None
+        # self._checksum     = None
+        # self._stat_st_size = None
 
     def _recalc(self):
         self._checksum     = None
