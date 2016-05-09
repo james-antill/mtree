@@ -1426,7 +1426,10 @@ def _setup_argp(all_cmds):
             help='file to load old metadata tree from')
     argp.add_option('--info-fields',
             '--information-fields', dest="info_fields", default="default",
-            help='fields to show in info command') # FIXME: allow stripping from snaps
+            help='fields to show in info command')
+    argp.add_option('--data-only',
+            action='store_true', default=False,
+            help='use only the data fields for everything, including snaps')
     argp.add_option('--info', dest="info_fields",
             help=optparse.SUPPRESS_HELP)
 
@@ -1493,6 +1496,8 @@ def _setup_arg_info(opts):
     # Allish -- no name, still has at. This is the save "format".
     ifields_all = set(['p', 'c', 's', 'num', 'mt',
                        'u', 'g', 'd', 'i', 'l', 'mo', 'at', 'ct'])
+    if opts.data_only:
+        ifields.update(set(['p', 'c', 's', 'mt'])) # Includes mt, =data doesn't
     for ifield in opts.info_fields.split(","):
         if ifield == 'all':
             ifields.update(ifields_all)
@@ -1603,6 +1608,8 @@ def main():
 
         info = set(['p', 'c', 's', 'num', 'mt',
                     'u', 'g', 'd', 'i', 'l', 'mo', 'at', 'ct'])
+        if opts.data_only:
+            info = set(['p', 'c', 's', 'mt'])
 
         snap_fn = cmds[1]
         if not os.path.isdir(snap_fn):
