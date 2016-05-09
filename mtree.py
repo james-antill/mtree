@@ -1227,13 +1227,15 @@ def _walk_checksum_vfsd_(vfsd, ui, progress):
             _walk_checksum_vfsd_(vfs, ui, progress)
 
     if progress is not None:
-        if isinstance(vfsd, VFS_d):
-            progress[1] += 1
-        else:
-            progress[1] += 1 + vfsd.size
+        progress[1] += 1
+        if not isinstance(vfsd, VFS_d):
+            half = int(vfsd.size / 2)
+            progress[1] += half
         tot = progress[0].num + progress[0].size
         _stupid_progress(tot, progress[1],
                          vfsd.path.replace('\n', '\\n'))
+        if not isinstance(vfsd, VFS_d):
+            progress[1] += vfsd.size - half
     vfsd.checksums()
 def _walk_checksum_vfsd(vfsd, ui=False):
     """ Walk the tree and ask for checksums. """
