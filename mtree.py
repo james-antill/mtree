@@ -629,7 +629,15 @@ def _term_add_bar(bar_max_length, pc):
         bar += '-'
     return '[%-*.*s]' % (blen, blen, bar)
 
+_stupid_progress_last = None
 def _stupid_progress(total, num, text):
+      global _stupid_progress_last
+      if _stupid_progress_last is None:
+          _stupid_progress_last = time.time()
+      now = time.time()
+      if now - _stupid_progress_last < 0.25:
+          return
+      _stupid_progress_last = now
       ui_tot = _ui_num(total)
       mnum = len(ui_tot)
       left = 79 - (mnum + 1 + mnum + 1 + 3 + 2 + 18 + 1)
