@@ -637,7 +637,7 @@ def _stupid_progress(total, num, text):
       perc = float(num) / float(total)
       textperc = _term_add_bar(16, perc)
       perc = int(100 * perc)
-      print '%*s/%*s %3u%% %s %-*s\r' % (mnum, ui_tot, mnum, _ui_num(num), perc,
+      print '%*s/%*s %3u%% %s %-*s\r' % (mnum, _ui_num(num), mnum, ui_tot, perc,
                                          textperc, left, text),
       sys.stdout.flush()
 def _stupid_progress_end():
