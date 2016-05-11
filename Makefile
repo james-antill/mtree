@@ -1,5 +1,9 @@
 
-all: stat-mtime readdir mtree.pyo
+all: stat-mtime readdir mtree.pyo pyreaddir.so
+
+pyreaddir.so: pyreaddir.c
+	@gcc $$(pkg-config --cflags --libs python) -fPIC -shared -o pyreaddir.so pyreaddir.c
+	@echo Compiling pyreaddir
 
 stat-mtime: stat-mtime.c
 	@gcc -o stat-mtime stat-mtime.c -Wall -W -O1
