@@ -6,6 +6,16 @@ __version_info__ = tuple([ int(num) for num in __version__.split('.')])
 import ctypes
 import sys
 
+try:
+    # akfa
+    import pyreaddir
+    readdir = pyreaddir.readdir
+    # print "JDBG:", "Using C readdir"
+except:
+    # print "JDBG:", "Using fake readdir"
+    def readdir(path=None):
+        return [(x, 'UNKNOWN', -1L) for x in os.listdir(path)]
+
 if False: pass
 
 elif sys.platform == "linux" or sys.platform == "linux2":
@@ -225,10 +235,10 @@ def _lstat_f(filename, ignore_EACCES=False):
         if ignore_EACCES and e.errno == errno.EACCES:
             return None
         raise
-def _listdir_f(dirname, ignore_EACCES=False):
-    """ Call os.listdir(), don't die if the dir. isn't readable. Returns []. """
+def _readdir_f(dirname, ignore_EACCES=False):
+    """ Call readdir(), don't die if the dir. isn't readable. Returns []. """
     try:
-        return os.listdir(dirname)
+        return readdir(dirname)
     except OSError, e:
         if e.errno in (errno.ENOENT, errno.ENOTDIR, errno.EPERM):
             return []
@@ -654,17 +664,28 @@ def _stupid_progress_end():
 
 def _walk_(vfsd, ui, progress):
     " Internal Worker. "
-    for fn in _listdir_f(vfsd.path):
-        vfs = VFS_f(vfsd, fn)
-        if vfs.isdir: # This requires a stat.
-                      # Use real Unix API for "free" file/dir. hint
-            vfs = VFS_d(vfsd, vfs.name, vfs._stat) # FIXME: hack so no stat 2x
-            vfsd.add(vfs)
-            _walk_(vfs, ui, progress)
-        elif not (vfs.islnk or vfs.isreg):
+    for (fn, T, ino) in _readdir_f(vfsd.path):
+        if T not in ('DIR', 'REG', 'LNK', 'UNKNOWN'):
             continue
+
+        if False: pass
+        elif T == 'DIR':
+            isdir = True
+            vfs = VFS_d(vfsd, fn)
         else:
-            vfsd.add(vfs)
+            isdir = False
+            vfs = VFS_f(vfsd, fn)
+            if T == 'UNKNOWN':
+                if vfs.isdir: # This requires a stat.
+                    isdir = True
+                    vfs = VFS_d(vfsd, vfs.name, vfs._stat) # hack so no stat 2x
+                elif not (vfs.islnk or vfs.isreg):
+                    continue
+
+        vfsd.add(vfs)
+
+        if isdir:
+            _walk_(vfs, ui, progress)
         if False and progress is not None:
             progress[1] += 1
             _stupid_progress(progress[0].num + 1, progress[1],
