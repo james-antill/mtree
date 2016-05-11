@@ -16,6 +16,16 @@ except:
     def readdir(path=None):
         return [(x, 'UNKNOWN', -1L) for x in os.listdir(path)]
 
+try:
+    # akfa
+    import pylstat
+    _lstat_ns = pylstat.lstat
+    _stat_ns  = pylstat.stat
+    # print "JDBG:", "Using C lstat"
+except:
+    # print "JDBG:", "Using fake lstat"
+    pylstat = None
+
 if False: pass
 
 elif sys.platform == "linux" or sys.platform == "linux2":
@@ -225,10 +235,14 @@ import weakref
 import time # mtime UI
 import errno
 
+if pylstat is None:
+    _lstat_ns = os.lstat
+    _stat_ns  = os.stat
+
 def _lstat_f(filename, ignore_EACCES=False):
-    """ Call os.lstat(), but don't die if the file isn't there. Returns None. """
+    """ Call lstat(), but don't die if the file isn't there. Returns None. """
     try:
-        return os.lstat(filename)
+        return _lstat_ns(filename)
     except OSError, e:
         if e.errno in (errno.ENOENT, errno.ENOTDIR):
             return None
@@ -271,14 +285,18 @@ def _vfs_depth(vfs):
         return 0 # 1 ?
     return _vfs_depth(parent) + 1
 
+_s2ns = 1000000000 # billion, for seconds * billion == nanoseconds
 class VFS_f(object):
     __slots__ = ['_parent', 'name', 'readonly',
                  '_checksum', '_stat', '_path', '_depth',
                  '_stat_st_size',
                  '_stat_st_mtime',
+                 '_stat_st_mtime_ns',
                  '_stat_st_mode',
                  '_stat_st_ctime',
+                 '_stat_st_ctime_ns',
                  '_stat_st_atime',
+                 '_stat_st_atime_ns',
                  '_stat_st_nlink',
                  '_stat_st_dev',
                  '_stat_st_ino',
@@ -302,11 +320,14 @@ class VFS_f(object):
         self._depth    = None
 
         self._stat_st_size  = None
-        self._stat_st_mtime = None
+        self._stat_st_mtime    = None
+        self._stat_st_mtime_ns = None
 
         self._stat_st_mode  = None
-        self._stat_st_ctime = None
-        self._stat_st_atime = None
+        self._stat_st_ctime    = None
+        self._stat_st_ctime_ns = None
+        self._stat_st_atime    = None
+        self._stat_st_atime_ns = None
         self._stat_st_nlink = None
 
         self._stat_st_dev   = None
@@ -409,11 +430,49 @@ class VFS_f(object):
                         fset=lambda self,val: self._setStatVal("st_atime", val),
                         fdel=lambda self:     self._delStatVal("st_atime"),
                         doc="Access time of the file (cached)")
-    st_ctime = property(fget=lambda self: int(self._getStatVal("st_ctime")),
+    def _getStatAtimens(self):
+        if self._stat_st_atime_ns is not None:
+            return int(self._stat_st_atime_ns)
+
+        if pylstat is None:
+            return self.st_atime * _s2ns
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return self.st_atime * _s2ns
+        return _stat.st_atime_ns
+    st_atime_ns = property(fget=lambda self: self._getStatAtimens(),
+                     fset=lambda self,val: self._setStatVal("st_atime_ns", val),
+                     fdel=lambda self:     self._delStatVal("st_atime_ns"),
+                           doc="Access time of the file in nanoseconds(cached)")
+    def _getStatCtime(self):
+        if self._stat_st_ctime is not None:
+            return int(self._stat_st_ctime)
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return 0
+        return int(_stat.st_ctime)
+    st_ctime = property(fget=lambda self:     self._getStatCtime(),
                         fset=lambda self,val: self._setStatVal("st_ctime", val),
                         fdel=lambda self:     self._delStatVal("st_ctime"),
                         doc="Change time of the file (cached)")
-    def _getStatMtime(self): # For speed?
+    def _getStatCtimens(self):
+        if self._stat_st_ctime_ns is not None:
+            return int(self._stat_st_ctime_ns)
+
+        if pylstat is None:
+            return self.st_ctime * _s2ns
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return self.st_ctime * _s2ns
+        return _stat.st_ctime_ns
+    st_ctime_ns = property(fget=lambda self: self._getStatCtimens(),
+                     fset=lambda self,val: self._setStatVal("st_ctime_ns", val),
+                     fdel=lambda self:     self._delStatVal("st_ctime_ns"),
+                          doc="Change time of the file in nanoseconds (cached)")
+    def _getStatMtime(self):
         if self._stat_st_mtime is not None:
             return int(self._stat_st_mtime)
 
@@ -425,6 +484,21 @@ class VFS_f(object):
                      fset=lambda self,val: self._setStatVal("st_mtime", val),
                      fdel=lambda self:     self._delStatVal("st_mtime"),
                      doc="Modified time of the file (cached)")
+    def _getStatMtimens(self):
+        if self._stat_st_mtime_ns is not None:
+            return int(self._stat_st_mtime_ns)
+
+        if pylstat is None:
+            return self.mtime * _s2ns
+
+        _stat = self._getStatStat()
+        if _stat is None:
+            return self.mtime * _s2ns
+        return _stat.st_mtime_ns
+    mtime_ns = property(fget=lambda self:     self._getStatMtimens(),
+                     fset=lambda self,val: self._setStatVal("st_mtime_ns", val),
+                     fdel=lambda self:     self._delStatVal("st_mtime_ns"),
+                        doc="Modified time of the file in nanoseconds (cached)")
     st_ino = property(fget=lambda self:     self._getStatVal("st_ino"),
                       fset=lambda self,val: self._setStatVal("st_ino", val),
                       fdel=lambda self:     self._delStatVal("st_ino"),
@@ -778,7 +852,7 @@ def _load(fn, data_only=False, gunzip=True):
         return None
 
     line = fo.readline()
-    if line != "mtree-file-0.1\n":
+    if line not in ("mtree-file-0.1\n", "mtree-file-0.2\n"):
         print >>sys.stderr, "Invalid header line %d, in %s\n => %s" % (num, fn, line)
         return None
 
@@ -874,7 +948,14 @@ def _load(fn, data_only=False, gunzip=True):
 
         elif line[0] == 'M' and line[1] == 'T' and line[2] == ':':
             try:
-                vfs._stat_st_mtime = int(line[4:])
+                sline = line[4:].split('.')
+                if False: pass
+                elif len(sline) == 1:
+                    vfs._stat_st_mtime = int(sline[0])
+                elif len(sline) == 2:
+                    vfs._stat_st_mtime    = int(sline[0])
+                    vfs._stat_st_mtime_ns = int(sline[1])
+                    vfs._stat_st_mtime_ns += vfs._stat_st_mtime * _s2ns
             except ValueError:
                 print >>sys.stderr, "Invalid mtime line %d, in %s\n => %s" % (num, fn, sline)
                 return None
@@ -950,7 +1031,14 @@ def _load(fn, data_only=False, gunzip=True):
 
         elif line[0] == 'A' and line[1] == 'T' and line[2] == ':':
             try:
-                vfs._stat_st_atime = int(line[4:])
+                sline = line[4:].split('.')
+                if False: pass
+                elif len(sline) == 1:
+                    vfs._stat_st_atime = int(sline[0])
+                elif len(sline) == 2:
+                    vfs._stat_st_atime    = int(sline[0])
+                    vfs._stat_st_atime_ns = int(sline[1])
+                    vfs._stat_st_atime_ns += vfs._stat_st_atime * _s2ns
             except ValueError:
                 print >>sys.stderr, "Invalid atime line %d, in %s\n => %s" % (num, fn, sline)
                 return None
@@ -960,7 +1048,14 @@ def _load(fn, data_only=False, gunzip=True):
 
         elif line[0] == 'C' and line[1] == 'T' and line[2] == ':':
             try:
-                vfs._stat_st_ctime = int(line[4:])
+                sline = line[4:].split('.')
+                if False: pass
+                elif len(sline) == 1:
+                    vfs._stat_st_atime = int(sline[0])
+                elif len(sline) == 2:
+                    vfs._stat_st_ctime    = int(sline[0])
+                    vfs._stat_st_ctime_ns = int(sline[1])
+                    vfs._stat_st_ctime_ns += vfs._stat_st_ctime * _s2ns
             except ValueError:
                 print >>sys.stderr, "Invalid ctime line %d, in %s\n => %s" % (num, fn, sline)
                 return None
@@ -1046,6 +1141,12 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False):
                 if vfs.mtime != cvfs.mtime:
                     if verbose:
                         print >>sys.stderr, "Cache: no mtime:", vfs.path
+                    continue
+                if (pylstat is not None and
+                     vfs.mtime_ns       != cvfs.mtime_ns and # Valid
+                    (vfs.mtime * _s2ns) != cvfs.mtime_ns):   # No NS in cache
+                    if verbose:
+                        print >>sys.stderr, "Cache: no mtime_ns:", vfs.path
                     continue
             if verify_cached in ("ism", "nism", "pism"):
                 if vfs.st_dev != cvfs.st_dev:
@@ -1142,8 +1243,13 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
         return _maybe_ui(val, _ui_num)
     def _muil(val):
         return _maybe_ui(val, _ui_lnum)
-    def _muit(val):
-        return _maybe_ui(val, _ui_time)
+    def _muit(val, valns):
+        ret = _maybe_ui(val, _ui_time)
+        if pylstat is not None:
+            valns -= val * _s2ns
+            if valns:
+                ret = str(ret) + ".%09u" % valns
+        return ret
 
     assert info is not None
 
@@ -1190,7 +1296,7 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
         if isinstance(vfs, VFS_d):
             fo.write("%s %s %s\n"  % ('Num:',  _muil(len(vfs.nodes)), _muil(vfs.num)))
     if 'mt' in info:
-        fo.write("%s %s\n"  % ('MT:', _muit(vfs.mtime)))
+        fo.write("%s %s\n"  % ('MT:', _muit(vfs.mtime, vfs.mtime_ns)))
 
     if 'u' in info:
         fo.write("%s %d\n"  % ('U:',  vfs.st_uid))
@@ -1208,9 +1314,9 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
         else:
             fo.write("%s %#o\n" % ('MO:', vfs.st_mode))
     if 'at' in info:
-        fo.write("%s %s\n"  % ('AT:', _muit(vfs.st_atime)))
+        fo.write("%s %s\n"  % ('AT:', _muit(vfs.st_atime, vfs.st_atime_ns)))
     if 'ct' in info:
-        fo.write("%s %s\n"  % ('CT:', _muit(vfs.st_ctime)))
+        fo.write("%s %s\n"  % ('CT:', _muit(vfs.st_ctime, vfs.st_ctime_ns)))
 
 def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False):
     _prnt_vfs(fo, vfsd, info, ui, tree)
@@ -1663,7 +1769,10 @@ def main():
             print >>sys.stderr, "open(%s): %s" % (snap_fn, e)
             sys.exit(1)
 
-         out.write("mtree-file-0.1\n")
+         if pylstat is None:
+             out.write("mtree-file-0.1\n")
+         else: # Can have NS data in atime/ctime/mtime
+             out.write("mtree-file-0.2\n")
          roots = {}
          for path in cmds[2:]:
             if not os.path.isdir(path):

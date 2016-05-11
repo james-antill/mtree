@@ -1,4 +1,5 @@
-mtime nsec
+stat files in mproc
+checksum files in mproc
 no saved atime, so .mtree files are identical.
 mtree (modes/uid/etc.)
 relative roots, in snap, kind of like summary? For input absolute paths.
