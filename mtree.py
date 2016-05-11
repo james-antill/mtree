@@ -1,6 +1,6 @@
 #! /usr/bin/python -tt
 
-__version__ = '0.1.4'
+__version__ = '0.1.8'
 __version_info__ = tuple([ int(num) for num in __version__.split('.')])
 
 import ctypes
