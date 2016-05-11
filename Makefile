@@ -1,12 +1,16 @@
 
 # Use PKG_CONFIG_PATH=macos-pkg-config make on mac OSX
 
-all: readdir mtree.pyo pyreaddir.so
-# all: stat-mtime readdir mtree.pyo pyreaddir.so
+all:                     mtree.pyo pyreaddir.so pylstat.so
+xall: stat-mtime readdir mtree.pyo pyreaddir.so pylstat.so
 
 pyreaddir.so: pyreaddir.c
 	@gcc $$(pkg-config --cflags --libs python) -fPIC -shared -o pyreaddir.so pyreaddir.c
 	@echo Compiling pyreaddir
+
+pylstat.so: pylstat.c
+	@gcc $$(pkg-config --cflags --libs python) -fPIC -shared -o pylstat.so pylstat.c
+	@echo Compiling pylstat
 
 stat-mtime: stat-mtime.c
 	@gcc -o stat-mtime stat-mtime.c -Wall -W -O1
@@ -23,5 +27,5 @@ mtree.pyo: mtree.py
 
 clean:
 	rm -f stat-mtime readdir
-	rm -f pyreaddir.so
+	rm -f pyreaddir.so pylstat.so
 	rm -f *.pyo *.pyc

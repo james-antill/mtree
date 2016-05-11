@@ -8,3 +8,4 @@ xabcd
 stat-mtime
 readdir
 pyreaddir.so
+pylstat.so
