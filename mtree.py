@@ -1657,14 +1657,15 @@ def main():
         print "Creating snapshot:", snap_fn
 
         try:
+         try:
             out = open(snap_fn, "wb")
-        except IOError, e:
+         except IOError, e:
             print >>sys.stderr, "open(%s): %s" % (snap_fn, e)
             sys.exit(1)
 
-        out.write("mtree-file-0.1\n")
-        roots = {}
-        for path in cmds[2:]:
+         out.write("mtree-file-0.1\n")
+         roots = {}
+         for path in cmds[2:]:
             if not os.path.isdir(path):
                 print >>sys.stderr, "Path is not a directory: %s" % path
                 continue
@@ -1687,6 +1688,10 @@ def main():
             _prnt_vfsd(out, vfs, info=info)
             _jdbg("pre prnt vfs")
             _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
+        except KeyboardInterrupt, e:
+            print >>sys.stderr, "Removing: ", snap_fn
+            unlink_f(snap_fn)
+            raise
 
     elif cmd == 'summary':
         if len(cmds) < 2:
@@ -1836,4 +1841,8 @@ def main():
     sys.exit(errcode)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt, e:
+        print >>sys.stderr, "Exiting on C-c."
+        sys.exit(1)
