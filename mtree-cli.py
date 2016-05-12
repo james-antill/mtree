@@ -3,4 +3,9 @@
 import mtree
 
 if __name__ == "__main__":
-    mtree.main()
+    try:
+        mtree.main()
+    except KeyboardInterrupt, e:
+        import sys
+        print >>sys.stderr, "Exiting on C-c."
+        sys.exit(1)
