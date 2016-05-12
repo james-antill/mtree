@@ -840,7 +840,6 @@ def _valid_cached_dirs(vfsd, verbose=False):
                 ret = False
     return ret
 
-_cached = {}
 def _load_p(fn, num, roots, ifo, line):
     sline = line.split(' ', 3)
     if len(sline) != 4:
@@ -868,10 +867,45 @@ def _load_p(fn, num, roots, ifo, line):
     name = names[-1]
     vfs = _name2vfs(roots, parent, T, name, readonly=True)
 
-    if vfs.name not in _cached:
-        _cached[vfs.name] = []
-    _cached[vfs.name].append(vfs)
     return vfs
+
+_cached_nodes_di = {}
+_cached_nodes_ns = {}
+_cached_nodes_ps = {}
+def _load_cached(vfs): # Cache stuff, note that we only care about checksums
+    if vfs is None:
+        return
+
+    if vfs._stat_st_size is None:
+        return
+
+    if vfs.name not in _cached_nodes_ns:
+        _cached_nodes_ns[vfs.name] = {}
+    if vfs.size not in _cached_nodes_ns[vfs.name]:
+        _cached_nodes_ns[vfs.name][vfs.size] = [vfs]
+    elif False:
+        last = _cached_nodes_ns[vfs.name][vfs.size][-1]
+        if last.checksums() != vfs.checksums():
+            _cached_nodes_ns[vfs.name][vfs.size].append(vfs)
+    else:
+        _cached_nodes_ns[vfs.name][vfs.size].append(vfs)
+
+    if vfs.path not in _cached_nodes_ps:
+        _cached_nodes_ps[vfs.path] = {}
+    if vfs.size not in _cached_nodes_ps[vfs.path]:
+        _cached_nodes_ps[vfs.path][vfs.size] = [vfs]
+    else:
+        _cached_nodes_ps[vfs.path][vfs.size].append(vfs)
+
+    if vfs._stat_st_dev is None or vfs._stat_st_ino is None:
+        return
+
+    if vfs.st_dev not in _cached_nodes_di:
+        _cached_nodes_di[vfs.st_dev] = {}
+    if vfs.st_ino not in _cached_nodes_di[vfs.st_dev]:
+        _cached_nodes_di[vfs.st_dev][vfs.st_ino] = [vfs]
+    else:
+        _cached_nodes_di[vfs.st_dev][vfs.st_ino].append(vfs)
 
 import gzip
 def _load(fn, data_only=False, gunzip=True):
@@ -939,6 +973,7 @@ def _load(fn, data_only=False, gunzip=True):
         if False: pass
         elif line[0] == 'P' and line[1] == ':':
 
+            _load_cached(vfs)
             vfs = _load_p(fn, num, roots, ifo, line)
             if vfs is None:
                 return None
@@ -1100,6 +1135,7 @@ def _load(fn, data_only=False, gunzip=True):
         else:
             print >>sys.stderr, "Unknown line %d, in %s\n => %s\n" % (num, fn, line)
 
+    _load_cached(vfs)
     return roots
 
 def _1root_load(path, data_only=False):
@@ -1135,6 +1171,39 @@ def u_load(path, data_only=False):
         return None
     return root, node
 
+def _cache_read_ns(vfs, verbose):
+    if vfs.name not in _cached_nodes_ns:
+        if verbose:
+            print >>sys.stderr, "Cache: Name not found:", vfs.name
+        return []
+
+    if vfs.size not in _cached_nodes_ns[vfs.name]:
+        if verbose:
+            print >>sys.stderr, "Cache: Size not found:", vfs.name, vfs.size
+        return []
+    return _cached_nodes_ns[vfs.name][vfs.size]
+def _cache_read_ps(vfs, verbose):
+    if vfs.path not in _cached_nodes_ps:
+        if verbose:
+            print >>sys.stderr, "Cache: Path not found:", vfs.path
+        return []
+
+    if vfs.size not in _cached_nodes_ps[vfs.path]:
+        if verbose:
+            print >>sys.stderr, "Cache: Size not found:", vfs.path, vfs.size
+        return []
+    return _cached_nodes_ps[vfs.path][vfs.size]
+def _cache_read_di(vfs, verbose):
+    if vfs.st_dev not in _cached_nodes_di:
+        if verbose:
+            print >>sys.stderr, "Cache: Dev not found:", vfs.name
+        return []
+    if vfs.st_ino not in _cached_nodes_di[vfs.st_dev]:
+        if verbose:
+            print >>sys.stderr, "Cache: Inode not found:", vfs.name
+        return []
+    return _cached_nodes_di[vfs.st_dev][vfs.st_ino]
+
 def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
     for vfs in vfsd:
         if progress is not None:
@@ -1146,15 +1215,39 @@ def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
             _cache_read_(vfs, verify_cached, verbose, progress)
             # continue # More checks??
 
-        # FIXME: i needs ino/dev lookup
-        if vfs.name not in _cached:
-            if verbose:
-                print >>sys.stderr, "Cache: Not found:", len(vfs.name), vfs.name, vfs.name
-            continue
+        if False: pass
+
+        elif verify_cached in ("ism", "nism", "pism"):
+            # Try to use dev/inode
+            try_nodes = _cache_read_di(vfs, verbose)
+            if _cache_read_chk(vfs, verify_cached, verbose, progress,try_nodes):
+                continue
+            try_nodes = _cache_read_ns(vfs, verbose)
+
+        elif verify_cached in ("ps", "psm", "pism"):
+            # Use path/size
+            try_nodes = _cache_read_ps(vfs, verbose)
+
+        else:
+            # Don't try dev/inode as we don't have that data here.
+            try_nodes = _cache_read_ps(vfs, verbose)
+            if _cache_read_chk(vfs, verify_cached, verbose, progress,try_nodes):
+                continue
+            try_nodes = _cache_read_ns(vfs, verbose)
+
+        _cache_read_chk(vfs, verify_cached, verbose, progress, try_nodes)
+
+def _cache_read_chk(vfs, verify_cached, verbose, progress, try_nodes):
+        assert vfs._stat is not None
+
+        if False and len(try_nodes) >= 10:
+            _stupid_progress_end()
+            print >>sys.stderr, "Cache: lots:", vfs.name, len(try_nodes)
+            if len(try_nodes) > 1000: akfjaljfdlajlkdsajf
 
         found = None
         isd = isinstance(vfs, VFS_d)
-        for cvfs in _cached[vfs.name]:
+        for cvfs in try_nodes:
             if isd != isinstance(cvfs, VFS_d):
                 if verbose:
                     print >>sys.stderr, "Cache: dir. vs file:", vfs.path
@@ -1215,9 +1308,13 @@ def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
                     found = None
                     break
                 found = cvfs
+                if True: break # Don't multi search anymore, we have NS time.
 
         if found is not None:
             vfs._checksum = found.checksums()
+            return True
+        return False
+
 def _cache_read(vfsd, verify_cached="nsm", verbose=False, ui=False):
     if verbose:
         print >>sys.stderr, "Cache: verify:", verify_cached
@@ -1827,8 +1924,9 @@ def main():
             if old_snaps:
                 last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
                 print "Loading snapshot:", last_snap
+                data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
                 _jdbgb("auto loaded")
-                auto_cached_root = u_load(snap_fn + "/" + last_snap)
+                auto_cached_root = u_load(snap_fn + "/" + last_snap, data_only)
                 _jdbge("auto loaded")
             snap_fn += "/"
             snap_fn += snap_base
@@ -1914,8 +2012,7 @@ def main():
 
         data_only = False
         if cmd in ('list', 'tree'):
-            if opts.verify_cached in ("ns", "ps", "nsm", "psm"):
-                data_only = True
+            data_only = True
             ifields = False
 
         _jdbg("beg")
@@ -1952,9 +2049,7 @@ def main():
         else:
             roots1 = {}
             roots2 = {}
-            data_only = False
-            if opts.verify_cached in ("ns", "ps", "nsm", "psm"):
-                data_only = True
+            data_only = True
             _jdbgb("load 1")
             roots1[1] = u_load(cmds[1], data_only)
             _jdbge("load 1")
