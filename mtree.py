@@ -1674,11 +1674,22 @@ def _setup_arg_cache_load(opts):
     return _cached_roots
 
 __jdbg_print__ = True
-_beg = time.time()
+_top_beg = time.time()
 def _jdbg(arg):
     if not __jdbg_print__:
         return
-    print >>sys.stderr, "JDBG: %f %s" % (time.time()-_beg, arg)
+    print >>sys.stderr, "JDBG: %f %s" % (time.time()-_top_beg, arg)
+_last_beg = None
+def _jdbgb(arg):
+    global _last_beg
+    if not __jdbg_print__:
+        return
+    _last_beg = time.time()
+    print >>sys.stderr, "JDBG: %f BEG: %s" % (_last_beg-_top_beg, arg)
+def _jdbge(arg):
+    if not __jdbg_print__:
+        return
+    print >>sys.stderr, "JDBG: %f      %s" % (time.time()-_last_beg, arg)
 
 def main():
     """ Command line UI to run commands. """
@@ -1765,8 +1776,9 @@ def main():
             if old_snaps:
                 last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
                 print "Loading snapshot:", last_snap
+                _jdbgb("auto loaded")
                 auto_cached_root = u_load(snap_fn + "/" + last_snap)
-                _jdbg("auto loaded")
+                _jdbge("auto loaded")
             snap_fn += "/"
             snap_fn += snap_base
             snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
@@ -1796,18 +1808,28 @@ def main():
 
             vfs = _name2vfs(roots, parent, 'd', name)
 
-            _jdbg("pre walk")
+            _jdbgb("walk")
             _walk(vfs, ui=opts.ui)
-            _jdbg("pre cache read")
-            _cache_read(vfs, opts.verify_cached, opts.verbose)
+            _jdbge("walk")
 
-            _jdbg("pre walk checksums")
+            _jdbgb("walk stat")
+            _walk_stat_vfsd(vfs, ui=opts.ui)
+            _jdbge("walk stat")
+
+            _jdbgb("cached read")
+            _cache_read(vfs, opts.verify_cached, opts.verbose, ui=opts.ui)
+            _jdbge("cached read")
+
+            _jdbgb("walk checksums")
             _walk_checksum_vfsd(vfs, ui=opts.ui)
-            _jdbg("walked checksums")
-            _jdbg("pre prnt vfsd")
+            _jdbge("walk checksums")
+
+            _jdbgb("prnt vfsd")
             _prnt_vfsd(out, vfs, info=info)
-            _jdbg("pre prnt vfs")
+            _jdbge("prnt vfsd")
+            _jdbgb("prnt vfs")
             _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
+            _jdbge("prnt vfs")
         except KeyboardInterrupt, e:
             print >>sys.stderr, "\nRemoving: ", snap_fn
             _unlink_f(snap_fn)
@@ -1847,8 +1869,9 @@ def main():
 
         _jdbg("beg")
         for fn in cmds[1:]:
+            _jdbgb("load")
             root = u_load(fn, data_only)
-            _jdbg("loaded")
+            _jdbge("loaded")
             if root is None:
                 errcode = 1
                 done = True
@@ -1881,12 +1904,14 @@ def main():
             data_only = False
             if opts.verify_cached in ("ns", "ps", "nsm", "psm"):
                 data_only = True
+            _jdbgb("load 1")
             roots1[1] = u_load(cmds[1], data_only)
-            _jdbg("load 1")
+            _jdbge("load 1")
             if roots1[1] is None:
                 sys.exit(1)
+            _jdbgb("load 2")
             roots2[2] = u_load(cmds[2], data_only)
-            _jdbg("load 2")
+            _jdbge("load 2")
             if roots2[2] is None:
                 sys.exit(1)
             # Need to keep real root around due to GC.
