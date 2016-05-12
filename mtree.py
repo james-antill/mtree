@@ -1729,18 +1729,18 @@ _top_beg = time.time()
 def _jdbg(arg):
     if not __jdbg_print__:
         return
-    print >>sys.stderr, "JDBG: %f %s" % (time.time()-_top_beg, arg)
+    print >>sys.stderr, "JDBG: %.4f %s" % (time.time()-_top_beg, arg)
 _last_beg = None
 def _jdbgb(arg):
     global _last_beg
     if not __jdbg_print__:
         return
     _last_beg = time.time()
-    print >>sys.stderr, "JDBG: %f BEG: %s" % (_last_beg-_top_beg, arg)
+    print >>sys.stderr, "JDBG: %6.2f BEG: %s" % (_last_beg-_top_beg, arg)
 def _jdbge(arg):
     if not __jdbg_print__:
         return
-    print >>sys.stderr, "JDBG: %f      %s" % (time.time()-_last_beg, arg)
+    print >>sys.stderr, "JDBG: %6.2f      %s" % (time.time()-_last_beg, arg)
 
 def main():
     """ Command line UI to run commands. """
