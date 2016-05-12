@@ -259,6 +259,16 @@ def _readdir_f(dirname, ignore_EACCES=False):
         if ignore_EACCES and e.errno == errno.EACCES:
             return []
         raise
+def _unlink_f(filename):
+    """ Call os.unlink, but don't die if the file isn't there. This is the main
+        difference between "rm -f" and plain "rm". """
+    try:
+        os.unlink(filename)
+        return True
+    except OSError, e:
+        if e.errno not in (errno.ENOENT, errno.EPERM, errno.EACCES,errno.EROFS):
+            raise
+    return False
 
 __show_checksum_work__ = False
 __show_stat_work__ = False
@@ -1798,8 +1808,8 @@ def main():
             _jdbg("pre prnt vfs")
             _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
         except KeyboardInterrupt, e:
-            print >>sys.stderr, "Removing: ", snap_fn
-            unlink_f(snap_fn)
+            print >>sys.stderr, "\nRemoving: ", snap_fn
+            _unlink_f(snap_fn)
             raise
 
     elif cmd == 'summary':
