@@ -345,11 +345,11 @@ class VFS_f(object):
         self._stat_st_uid   = None
         self._stat_st_gid   = None
 
-    def _parent_recalc(self):
+    def _parent_recalc(self, data_only=False):
         parent = _vfs_parent(self)
         if parent is None:
             return
-        parent._recalc()
+        parent._recalc(data_only)
 
     @property
     def path(self):
@@ -373,7 +373,7 @@ class VFS_f(object):
             if self.readonly:
                 return {}
 
-            self._parent_recalc()
+            self._parent_recalc(data_only=True)
 
             if False: pass
             elif self.isreg:
@@ -407,7 +407,7 @@ class VFS_f(object):
             if __show_stat_work__:
                 print >>sys.stderr, "JDBG: stat for *:", mem, self.path
 
-            self._parent_recalc()
+            self._parent_recalc(data_only=True)
 
             self._stat = _lstat_f(self.path)
         return self._stat # Can still be None
@@ -579,12 +579,13 @@ class VFS_d(VFS_f):
         # self._checksum     = None
         # self._stat_st_size = None
 
-    def _recalc(self):
+    def _recalc(self, data_only=False):
         self._checksum     = None
-        self._num          = None
+        if not data_only:
+            self._num      = None
         self._stat_st_size = None
 
-        self._parent_recalc()
+        self._parent_recalc(data_only)
 
     def add(self, vfs):
         # assert vfs.parent is self
@@ -603,7 +604,7 @@ class VFS_d(VFS_f):
         if self._checksum is None:
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self.path
-            self._parent_recalc()
+            self._parent_recalc(data_only=True)
             self._checksum = _vfsd_checksum(self)
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self._checksum
@@ -613,7 +614,7 @@ class VFS_d(VFS_f):
     # def size(self):
     def _getSize(self):
         if self._stat_st_size is None:
-            self._parent_recalc()
+            self._parent_recalc(data_only=True)
             self._stat_st_size = _vfsd_size(self)
         return self._stat_st_size
 
@@ -1347,7 +1348,7 @@ def _walk_checksum_vfsd_prop(vfsd):
             if _walk_checksum_vfsd_prop(vfs):
                 ret = True
     if ret:
-        vfsd._parent_recalc()
+        vfsd._parent_recalc(data_only=True)
     return ret
 
 def _walk_checksum_vfsd_calc(vfsd, progress):
