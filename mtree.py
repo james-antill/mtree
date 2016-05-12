@@ -1923,10 +1923,11 @@ def main():
                             (snap.endswith(".mtree") or snap.endswith(".mtree.gz"))]
             if old_snaps:
                 last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
+                last_snap = snap_fn + "/" + last_snap
                 print "Loading snapshot:", last_snap
                 data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
                 _jdbgb("auto loaded")
-                auto_cached_root = u_load(snap_fn + "/" + last_snap, data_only)
+                auto_cached_root = u_load(last_snap, data_only)
                 _jdbge("auto loaded")
             snap_fn += "/"
             snap_fn += snap_base
