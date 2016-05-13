@@ -42,6 +42,12 @@ def _fcmp(a, b):
     if la == lb:
         return libc.memcmp(a, b, la)
     return la - lb
+def _shorten_snap(x):
+    if len(x) > 3 and x[-1] == 'z' and x[-2] == 'g' and x[-3] == '.':
+        return x[:-3]
+    return x
+def _snap_cmp(a, b):
+    return _fcmp(_shorten_snap(a), _shorten_snap(b))
 
 
 import hashlib
@@ -1922,7 +1928,7 @@ def main():
                          if snap.startswith(snap_base) and
                             (snap.endswith(".mtree") or snap.endswith(".mtree.gz"))]
             if old_snaps:
-                last_snap = sorted(old_snaps, cmp=_fcmp)[-1]
+                last_snap = sorted(old_snaps, cmp=_snap_cmp)[-1]
                 last_snap = snap_fn + "/" + last_snap
                 print "Loading snapshot:", last_snap
                 data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
