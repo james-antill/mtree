@@ -1145,6 +1145,9 @@ def _load(fn, data_only=False, gunzip=True):
     return roots
 
 def _1root_load(path, data_only=False):
+    if os.path.isdir(path):
+        xpath = auto_load_fn(path)
+        if xpath is not None: path = xpath
     roots = _load(path, data_only)
     if not roots:
         print >>sys.stderr, "No roots (%s)\n" % path
@@ -1176,6 +1179,26 @@ def u_load(path, data_only=False):
         print >>sys.stderr, "Bad node path:", node_path
         return None
     return root, node
+
+def auto_load_fns(snap_dir):
+    try:
+        old_snaps = os.listdir(snap_dir)
+    except:
+        return []
+    snap_base = os.path.basename(snap_dir)
+    old_snaps = [snap for snap in old_snaps
+                 if snap.startswith(snap_base) and
+                    (snap.endswith(".mtree") or snap.endswith(".mtree.gz"))]
+    if not old_snaps:
+        return []
+    return sorted(old_snaps, cmp=_snap_cmp)
+def auto_load_fn(snap_dir):
+    last_snap = auto_load_fns(snap_dir)
+    if not last_snap:
+        return None
+    last_snap = last_snap[-1]
+    last_snap = snap_dir + "/" + last_snap
+    return last_snap
 
 def _cache_read_ns(vfs, verbose):
     if vfs.name not in _cached_nodes_ns:
@@ -1921,18 +1944,12 @@ def main():
         else:
             _jdbg("auto snap")
             snap_base = os.path.basename(snap_fn)
-            old_snaps = []
+            auto_cached_root = None
             if opts.auto_load:
-                old_snaps = os.listdir(snap_fn)
-            old_snaps = [snap for snap in old_snaps
-                         if snap.startswith(snap_base) and
-                            (snap.endswith(".mtree") or snap.endswith(".mtree.gz"))]
-            if old_snaps:
-                last_snap = sorted(old_snaps, cmp=_snap_cmp)[-1]
-                last_snap = snap_fn + "/" + last_snap
+                _jdbgb("auto loaded")
+                last_snap = auto_load_fn(snap_fn)
                 print "Loading snapshot:", last_snap
                 data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
-                _jdbgb("auto loaded")
                 auto_cached_root = u_load(last_snap, data_only)
                 _jdbge("auto loaded")
             snap_fn += "/"
@@ -2042,8 +2059,16 @@ def main():
         _jdbg("end")
 
     elif cmd in ('difference', 'tree-difference'):
+        if len(cmds) == 2 and os.path.isdir(cmds[1]):
+            last_snaps = auto_load_fns(cmds[1])
+            if len(last_snaps) >= 2:
+                cmds[1:] = [cmds[1] + '/' + last_snaps[-2],
+                            cmds[1] + '/' + last_snaps[-1]]
+                print "Loading snapshot:", cmds[1]
+                print "Loading snapshot:", cmds[2]
         if len(cmds) != 3:
-            print >>sys.stderr, "Format: %s %s <filename> <filename>" % (prog, cmds[0])
+            print >>sys.stderr, "Format: %s %s [<dir>|<filename>] <filename>" % (prog, 
+                                                                                 cmds[0])
             sys.exit(1)
 
         if False:
