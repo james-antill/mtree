@@ -1,7 +1,18 @@
-stat files in mproc
-checksum files in mproc
-no saved atime, so .mtree files are identical.
-mtree (modes/uid/etc.)
-relative roots, in snap, kind of like summary? For input absolute paths.
+save progress
+checksum bytes progress
+utf8 for text shortening in progress
+
+MPROC
+        stat files
+        checksum files
+        readdir?
+
+load mtree files from C?
+
 cut / prune / yank / whatever
+find tree?
+diff metadata? (modes/uid/etc.)
+
+relative roots, in snap, kind of like summary? For input absolute paths.
+no saved atime, so .mtree files are identical. (mfilter?)
 

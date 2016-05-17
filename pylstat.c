@@ -1,6 +1,8 @@
 #include "Python.h"
 #include "structseq.h"
 
+/* this is mostly from cpython/Modules/posixmodule.c */
+
 PyDoc_STRVAR(pylstat_top__doc__,
 "This module provides access to lstat/stat with nsec data.");
 

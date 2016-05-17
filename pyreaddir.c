@@ -1,5 +1,7 @@
 #include "Python.h"
 
+/* this is mostly from cpython/Modules/posixmodule.c */
+
 PyDoc_STRVAR(pyreaddir_top__doc__,
 "This module provides access to readdir, which is similar to posix readdir.");
 
@@ -65,11 +67,11 @@ _pyreaddir(PyObject *self, PyObject *args)
     int arg_is_unicode = 1;
 
     errno = 0;
-    if (!PyArg_ParseTuple(args, "U:listdir", &v)) {
+    if (!PyArg_ParseTuple(args, "U:readdir", &v)) {
         arg_is_unicode = 0;
         PyErr_Clear();
     }
-    if (!PyArg_ParseTuple(args, "et:listdir", Py_FileSystemDefaultEncoding, &name))
+    if (!PyArg_ParseTuple(args, "et:readdir", Py_FileSystemDefaultEncoding, &name))
         return NULL;
     Py_BEGIN_ALLOW_THREADS
     dirp = opendir(name);
