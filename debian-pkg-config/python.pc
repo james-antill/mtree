@@ -1,0 +1,8 @@
+Name: python
+Description: James hack for py2.7 on Debian
+Requires:
+Version: 0.2.7
+
+Libs: -lpython2.7
+Cflags: -I/usr/include/python2.7
+

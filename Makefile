@@ -1,5 +1,8 @@
 
-# Use PKG_CONFIG_PATH=macos-pkg-config make on mac OSX
+# On mac OSX:
+#     PKG_CONFIG_PATH=macos-pkg-config  make
+# On Debian/Ubuntu:
+#     PKG_CONFIG_PATH=debian-pkg-config make
 
 all:                     mtree.pyo pyreaddir.so pylstat.so
 xall: stat-mtime readdir mtree.pyo pyreaddir.so pylstat.so ustr-wc
