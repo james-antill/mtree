@@ -1945,9 +1945,11 @@ def main():
             _jdbg("auto snap")
             snap_base = os.path.basename(snap_fn)
             auto_cached_root = None
+            last_snap = None
             if opts.auto_load:
                 _jdbgb("auto loaded")
                 last_snap = auto_load_fn(snap_fn)
+            if last_snap is not None:
                 print "Loading snapshot:", last_snap
                 data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
                 auto_cached_root = u_load(last_snap, data_only)
