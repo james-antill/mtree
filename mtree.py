@@ -1432,9 +1432,13 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False, ui=False):
     if progress is not None:
         _stupid_progress_end()
 
+# http://serverfault.com/questions/292014/preferred-format-of-file-names-which-include-a-timestamp
+def _sys_time(tm):
+    # return time.strftime("%Y%m%dT%H%MZ", time.gmtime(tm))
+    return time.strftime("%Y-%m-%d--%H%MZ", time.gmtime(tm))
 def _ui_time(tm, nospc=False):
     if nospc:
-        return time.strftime("%Y-%m-%d--%H%MZ", time.gmtime(tm))
+        return _sys_time(tm)
     return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(tm))
 
 import locale
