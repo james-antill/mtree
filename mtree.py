@@ -1697,6 +1697,28 @@ def _ui_prnt_root(root, ui=True, prefix="Root:"):
     print prefix, root.name, nnodes, nnum
     _prnt_vfs(sys.stdout, root, ui=ui)
 
+def _real_snapfn(snap_fn, auto_load, verify_cached):
+    if not os.path.isdir(snap_fn):
+        if auto_load and not snap_fn.endswith(".mtree"):
+            snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
+    else:
+        _jdbg("auto snap")
+        snap_base = os.path.basename(snap_fn)
+        auto_cached_root = None
+        last_snap = None
+        if auto_load:
+            _jdbgb("auto loaded")
+            last_snap = auto_load_fn(snap_fn)
+        if last_snap is not None:
+            print "Loading snapshot:", last_snap
+            data_only = verify_cached in ("ns", "ps", "nsm", "psm")
+            auto_cached_root = u_load(last_snap, data_only)
+            _jdbge("auto loaded")
+        snap_fn += "/"
+        snap_fn += snap_base
+        snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
+    return snap_fn
+
 def _setup_argp(all_cmds):
     import optparse
 
@@ -1882,7 +1904,7 @@ def main():
                   'snap' : 'snapshot',
                   }
     all_cmds = ("summary", "list", "information", "difference",
-                "snapshot", "check", "tree", "tree-difference", "help")
+                "snapshot", "check", "tree", "tree-difference", "resave", "help")
 
     (argp, (opts, cmds)) = _setup_argp(all_cmds)
     _jdbg("args")
@@ -1937,27 +1959,7 @@ def main():
         if opts.data_only:
             info = set(['p', 'c', 's', 'mt'])
 
-        snap_fn = cmds[1]
-        if not os.path.isdir(snap_fn):
-            if opts.auto_load and not snap_fn.endswith(".mtree"):
-                snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
-        else:
-            _jdbg("auto snap")
-            snap_base = os.path.basename(snap_fn)
-            auto_cached_root = None
-            last_snap = None
-            if opts.auto_load:
-                _jdbgb("auto loaded")
-                last_snap = auto_load_fn(snap_fn)
-            if last_snap is not None:
-                print "Loading snapshot:", last_snap
-                data_only = opts.verify_cached in ("ns", "ps", "nsm", "psm")
-                auto_cached_root = u_load(last_snap, data_only)
-                _jdbge("auto loaded")
-            snap_fn += "/"
-            snap_fn += snap_base
-            snap_fn += "-" + _ui_time(time.time(), nospc=True) + ".mtree"
-
+        snap_fn = _real_snapfn(cmds[1], opts.auto_load, opts.verify_cached)
         print "Creating snapshot:", snap_fn
 
         try:
@@ -2156,6 +2158,50 @@ def main():
                 # FIXME: Print diff?
                 _ui_prnt_root(_root2useful(root), ui=opts.ui, prefix="Failed root:")
                 done = True
+
+    elif cmd == 'resave':
+
+        if len(cmds) < 3:
+            print >>sys.stderr, "Format: %s %s <new-filename> <old-filename>" % (prog, cmds[0])
+            sys.exit(1)
+
+        old_root = u_load(cmds[2], opts.data_only)
+        if old_root is None:
+            sys.exit(1)
+            # Need to keep real root around due to GC.
+        rroot,old_root = old_root
+
+        info = set(['p', 'c', 's', 'num', 'mt',
+                    'u', 'g', 'd', 'i', 'l', 'mo', 'at', 'ct'])
+        if opts.data_only:
+            info = set(['p', 'c', 's', 'mt'])
+
+        snap_fn = _real_snapfn(cmds[1], opts.auto_load, opts.verify_cached)
+        print "Creating snapshot:", snap_fn
+
+        try:
+         try:
+            out = open(snap_fn, "wb")
+         except IOError, e:
+            print >>sys.stderr, "open(%s): %s" % (snap_fn, e)
+            sys.exit(1)
+
+         if False and pylstat is None: # Should work it out?
+             out.write("mtree-file-0.1\n")
+         else: # Can have NS data in atime/ctime/mtime
+             out.write("mtree-file-0.2\n")
+         vfs = old_root
+
+         _jdbgb("prnt vfsd")
+         _prnt_vfsd(out, vfs, info=info)
+         _jdbge("prnt vfsd")
+         _jdbgb("prnt vfs")
+         _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
+         _jdbge("prnt vfs")
+        except KeyboardInterrupt, e:
+            print >>sys.stderr, "\nRemoving: ", snap_fn
+            _unlink_f(snap_fn)
+            raise
 
     elif cmd == 'help':
         argp.print_help()
