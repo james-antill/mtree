@@ -301,6 +301,30 @@ def _vfs_depth(vfs):
         return 0 # 1 ?
     return _vfs_depth(parent) + 1
 
+def _num_cpus_online(unknown=1):
+    if not hasattr(os, "sysconf"):
+        return unknown
+
+    if not os.sysconf_names.has_key("SC_NPROCESSORS_ONLN"):
+        return unknown
+
+    ncpus = os.sysconf("SC_NPROCESSORS_ONLN")
+    try:
+        ncpus = int(ncpus)
+        if ncpus > 0:
+            return ncpus
+    except:
+        pass
+
+    return unknown
+
+mp_workers = None
+mp_worker_num = 0
+try:
+    import multiprocessing
+except:
+    pass
+
 _s2ns = 1000000000 # billion, for seconds * billion == nanoseconds
 class VFS_f(object):
     __slots__ = ['_parent', 'name', 'readonly',
@@ -381,26 +405,52 @@ class VFS_f(object):
 
             self._parent_recalc(data_only=True)
 
+            if __show_checksum_work__:
+                print >>sys.stderr, "JDBG: chksum for:", self.path
+
             if False: pass
             elif self.isreg:
-                if __show_checksum_work__:
-                    print >>sys.stderr, "JDBG: chksum for F:", self.path
                 self._checksum = _file2hexdigests(self.path)
-                if self._checksum is None: # EPERM
-                    self.size = 0
-                    self._checksum = _data2hexdigests("")
             elif self.islnk:
-                if __show_checksum_work__:
-                    print >>sys.stderr, "JDBG: chksum for L:", self.path
                 self._checksum = _link2hexdigests(self.path)
-                if self._checksum is None: # EPERM
-                    self.size = 0
-                    self._checksum = _data2hexdigests("")
-            else:
-                if __show_checksum_work__:
-                    print >>sys.stderr, "JDBG: chksum for *:", self.path
+
+            if self._checksum is None: # EPERM or not lnk/reg
+                self.size = 0
                 self._checksum = _data2hexdigests("")
+
         return self._checksum
+
+    def async_checksum_beg(self):
+        if self._checksum is None:
+            if self.readonly:
+                return {}
+
+            if False: pass
+            elif self.isreg:
+                self._checksum = mp_workers.apply_async(_file2hexdigests, (self.path,))
+            elif self.islnk:
+                self._checksum = mp_workers.apply_async(_link2hexdigests, (self.path,))
+            else:
+                self.size = 0
+                self._checksum = _data2hexdigests("")
+                return False
+
+            return True
+        return False
+
+    def async_checksum_ready(self):
+        if isinstance(self._checksum, multiprocessing.pool.AsyncResult):
+            return self._checksum.ready()
+        return None
+
+    def async_checksum_end(self):
+        if isinstance(self._checksum, multiprocessing.pool.AsyncResult):
+            self._parent_recalc(data_only=True)
+
+            self._checksum = self._checksum.get()
+            if self._checksum is None: # EPERM
+                self.size = 0
+                self._checksum = _data2hexdigests("")
 
     def _delStatVal(self, mem=None):
         self._stat = None
@@ -417,6 +467,25 @@ class VFS_f(object):
 
             self._stat = _lstat_f(self.path)
         return self._stat # Can still be None
+
+    def async_stat_beg(self):
+        if self._stat is None:
+            if self.readonly:
+                return None
+            self._stat = mp_workers.apply_async(_lstat_f, (self.path,))
+            return True
+        return False
+
+    def async_stat_ready(self):
+        if isinstance(self._stat, multiprocessing.pool.AsyncResult):
+            return self._stat.ready()
+        return None
+
+    def async_stat_end(self):
+        if isinstance(self._stat, multiprocessing.pool.AsyncResult):
+            self._stat = self._stat.get()
+            self._parent_recalc(data_only=True)
+
     def _getStatVal(self, mem, zero=0):
         _res = getattr(self, "_stat_" + mem)
         if _res is not None:
@@ -615,6 +684,13 @@ class VFS_d(VFS_f):
             if __show_checksum_work__:
                 print >>sys.stderr, "JDBG: chksum for D:", self._checksum
         return self._checksum
+
+    def async_checksum_beg(self):
+        return False
+    def async_checksum_ready(self):
+        return False
+    def async_checksum_end(self):
+        pass
 
     # @property
     # def size(self):
@@ -1557,6 +1633,71 @@ def _walk_checksum_vfsd(vfsd, ui=False):
     if progress is not None:
         _stupid_progress_end()
 
+def _walk_checksum_vfsd_mp_(vfsd, ui, progress, working):
+    " Internal Worker. "
+    if vfsd._checksum is not None:
+        return
+
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_checksum_vfsd_mp_(vfs, ui, progress, working)
+
+    if progress is not None:
+        progress[1] += 1
+        if not isinstance(vfsd, VFS_d):
+            half = int(vfsd.size / 2)
+            progress[1] += half
+        tot = progress[0]
+        _stupid_progress("SumMP: ", tot, progress[1],
+                         vfsd.path.replace('\n', '\\n'))
+
+    if not vfsd.async_checksum_beg():
+        if progress is not None:
+            if not isinstance(vfsd, VFS_d):
+                half = int(vfsd.size / 2)
+                progress[1] += vfsd.size - half
+        return
+
+    working.append(vfsd)
+    if len(working) > max(mp_worker_num, 256):
+        nworking = []
+        done = False
+        for ovfsd in working:
+            if not ovfsd.async_checksum_ready():
+                nworking.append(ovfsd)
+                continue
+
+            done = True
+            if progress is not None:
+                if not isinstance(ovfsd, VFS_d):
+                    half = int(ovfsd.size / 2)
+                    progress[1] += ovfsd.size - half
+            ovfsd.async_checksum_end()
+        if done:
+            working[:] = nworking
+
+def _walk_checksum_vfsd_mp(vfsd, ui=False):
+    """ Walk the tree and ask for checksums. """
+    _walk_checksum_vfsd_prop(vfsd)
+    progress = None
+    if ui:
+        progress = [0, 0]
+        _walk_checksum_vfsd_calc(vfsd, progress)
+    working = []
+    _walk_checksum_vfsd_mp_(vfsd, ui, progress, working)
+    for ovfsd in working:
+        ovfsd.async_checksum_end()
+        if progress is not None:
+            if not isinstance(ovfsd, VFS_d):
+                half = int(ovfsd.size / 2)
+                progress[1] += ovfsd.size - half
+            tot = progress[0]
+            _stupid_progress("SumMP: ", tot, progress[1],
+                             ovfsd.path.replace('\n', '\\n'))
+
+    if progress is not None:
+        _stupid_progress_end()
+
 def _walk_stat_vfsd_(vfsd, ui, progress):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
@@ -1576,6 +1717,42 @@ def _walk_stat_vfsd(vfsd, ui=False):
     if ui:
         progress = [vfsd, 0]
     _walk_stat_vfsd_(vfsd, ui, progress)
+    if progress is not None:
+        _stupid_progress_end()
+
+def _walk_stat_vfsd_mpb_(vfsd, ui, progress):
+    " Internal Worker. "
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_stat_vfsd_(vfs, ui, progress)
+
+    if progress is not None:
+        progress[1] += 1
+        tot = progress[0].num * 2
+        _stupid_progress("StatMP: ", tot, progress[1],
+                         vfsd.path.replace('\n', '\\n'))
+    vfsd.async_stat_beg()
+
+def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
+    " Internal Worker. "
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_stat_vfsd_(vfs, ui, progress)
+
+    if progress is not None:
+        progress[1] += 1
+        tot = progress[0].num * 2
+        _stupid_progress("StatMP: ", tot, progress[1],
+                         vfsd.path.replace('\n', '\\n'))
+    vfsd.async_stat_end()
+
+def _walk_stat_vfsd_mp(vfsd, ui=False):
+    """ Walk the tree and ask for stat data. """
+    progress = None
+    if ui:
+        progress = [vfsd, 0]
+    _walk_stat_vfsd_mpb_(vfsd, ui, progress)
+    _walk_stat_vfsd_mpe_(vfsd, ui, progress)
     if progress is not None:
         _stupid_progress_end()
 
@@ -1739,6 +1916,9 @@ def _setup_argp(all_cmds):
     argp.add_option('--ui',
             '--human', dest='ui', default=True, action='store_true',
             help='print in human readable format')
+    argp.add_option('--mp',
+            dest='mp', default=None, type='int',
+            help='use multiprocessing for N CPUs')
     argp.add_option('--no-chop-difference',
             dest="chop_diff", action='store_false',
             help='print full difference')
@@ -1896,6 +2076,8 @@ def main():
     """ Command line UI to run commands. """
     global prog
     global last_matched_chop
+    global mp_worker_num
+    global mp_workers
 
     remap_cmds = {'info' : 'information',
                   'ls' : 'list',
@@ -1927,6 +2109,13 @@ def main():
         global _prnt_diff_reg_mod
         _prnt_diff_dir_mod = False
         _prnt_diff_reg_mod = False
+
+    if opts.mp is None:
+        mp_worker_num = _num_cpus_online() * 4
+    elif opts.mp > 0:
+        mp_worker_num = opts.mp
+    if mp_worker_num:
+        mp_workers = multiprocessing.Pool(mp_worker_num)
 
     last_matched_chop = opts.chop_diff
 
@@ -1992,7 +2181,10 @@ def main():
             _jdbge("walk")
 
             _jdbgb("walk stat")
-            _walk_stat_vfsd(vfs, ui=opts.ui)
+            if mp_workers is None:
+                _walk_stat_vfsd(vfs, ui=opts.ui)
+            else:
+                _walk_stat_vfsd_mp(vfs, ui=opts.ui)
             _jdbge("walk stat")
 
             _jdbgb("cached read")
@@ -2000,7 +2192,10 @@ def main():
             _jdbge("cached read")
 
             _jdbgb("walk checksums")
-            _walk_checksum_vfsd(vfs, ui=opts.ui)
+            if mp_workers is None:
+                _walk_checksum_vfsd(vfs, ui=opts.ui)
+            else:
+                _walk_checksum_vfsd_mp(vfs, ui=opts.ui)
             _jdbge("walk checksums")
 
             _jdbgb("prnt vfsd")

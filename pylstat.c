@@ -432,7 +432,7 @@ initpylstat(void)
         return;
 
     if (!initialized) {
-        stat_result_desc.name = "inipylstat.stat_result";
+        stat_result_desc.name = "pylstat.stat_result";
         stat_result_desc.fields[7].name = PyStructSequence_UnnamedField;
         stat_result_desc.fields[8].name = PyStructSequence_UnnamedField;
         stat_result_desc.fields[9].name = PyStructSequence_UnnamedField;
