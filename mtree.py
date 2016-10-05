@@ -1234,6 +1234,8 @@ def _cache_read_di(vfs, verbose):
     return _cached_nodes_di[vfs.st_dev][vfs.st_ino]
 
 def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
+    if not _cached_nodes_ns:
+        return
     for vfs in vfsd:
         if progress is not None:
             progress[1] += 1
