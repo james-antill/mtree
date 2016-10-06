@@ -883,6 +883,26 @@ def _stupid_progress_end():
      print ' ' * 79, '\r',
      sys.stdout.flush()
 
+def _ui_path(vfs):
+    if False:
+        return vfs.path.replace('\\', '\\\\').replace('\n', '\\n')
+
+    nodes = [vfs]
+    while _vfs_parent(nodes[-1]) is not None:
+        nodes.append(_vfs_parent(nodes[-1]))
+    while len(nodes) >= 2 and len(nodes[-1].nodes) == 1:
+        nodes.pop()
+
+    path = ''
+    if len(nodes) != 1:
+        if nodes[-1].name == '/':
+            path = '/'
+            nodes.pop()
+        while len(nodes) >= 2:
+            path += nodes.pop().name + '/'
+    path += nodes[0].name
+    return path.replace('\\', '\\\\').replace('\n', '\\n')
+
 def _walk_(vfsd, ui, progress):
     " Internal Worker. "
     for (fn, T, ino) in _readdir_f(vfsd.path, ignore_EACCES=True):
@@ -910,7 +930,7 @@ def _walk_(vfsd, ui, progress):
         if progress is not None:
             progress[1] += 1
             _stupid_up_progress("Walk: ", progress[1],
-                                vfsd.path.replace('\n', '\\n'))
+                                _ui_path(vfsd))
 def _walk(vfsd, ui=False):
     """ Walk the FS, adding nodes for each. """
     progress = None
@@ -1348,7 +1368,7 @@ def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
             progress[1] += 1
             tot = progress[0].num
             _stupid_progress("Cache: ", tot, progress[1],
-                             vfs.path.replace('\n', '\\n'))
+                             _ui_path(vfs))
         if isinstance(vfs, VFS_d):
             _cache_read_(vfs, verify_cached, verbose, progress)
             # continue # More checks??
@@ -1652,7 +1672,7 @@ def _walk_checksum_vfsd_(vfsd, ui, progress):
             progress[1] += half
         tot = progress[0]
         _stupid_progress("Sum: ", tot, progress[1],
-                         vfsd.path.replace('\n', '\\n'))
+                         _ui_path(vfsd))
         if not isinstance(vfsd, VFS_d):
             progress[1] += vfsd.size - half
     vfsd.checksums()
@@ -1684,7 +1704,7 @@ def _walk_checksum_vfsd_mp_(vfsd, ui, progress, working):
             progress[1] += half
         tot = progress[0]
         _stupid_progress("SumMP: ", tot, progress[1],
-                         vfsd.path.replace('\n', '\\n'))
+                         _ui_path(vfsd))
 
     if not vfsd.async_checksum_beg():
         if progress is not None:
@@ -1728,7 +1748,7 @@ def _walk_checksum_vfsd_mp(vfsd, ui=False):
                 progress[1] += ovfsd.size - half
             tot = progress[0]
             _stupid_progress("SumMP: ", tot, progress[1],
-                             ovfsd.path.replace('\n', '\\n'))
+                             _ui_path(ovfsd))
 
     if progress is not None:
         _stupid_progress_end()
@@ -1743,7 +1763,7 @@ def _walk_stat_vfsd_(vfsd, ui, progress):
         progress[1] += 1
         tot = progress[0].num
         _stupid_progress("Stat: ", tot, progress[1],
-                         vfsd.path.replace('\n', '\\n'))
+                         _ui_path(vfsd))
     vfsd.mtime
 
 def _walk_stat_vfsd(vfsd, ui=False):
@@ -1765,7 +1785,7 @@ def _walk_stat_vfsd_mpb_(vfsd, ui, progress):
         progress[1] += 1
         tot = progress[0].num * 2
         _stupid_progress("StatMP: ", tot, progress[1],
-                         vfsd.path.replace('\n', '\\n'))
+                         _ui_path(vfsd))
     vfsd.async_stat_beg()
 
 def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
@@ -1778,7 +1798,7 @@ def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
         progress[1] += 1
         tot = progress[0].num * 2
         _stupid_progress("StatMP: ", tot, progress[1],
-                         vfsd.path.replace('\n', '\\n'))
+                         _ui_path(vfsd))
     vfsd.async_stat_end()
 
 def _walk_stat_vfsd_mp(vfsd, ui=False):
