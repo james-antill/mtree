@@ -796,15 +796,46 @@ def find_node(root, path):
         vfs = vfs.nodes[name]
     return vfs
 
+_filblok_left2right = (
+        '\xe2\x96\x8f',
+        '\xe2\x96\x8e',
+        '\xe2\x96\x8d',
+        '\xe2\x96\x8c',
+        '\xe2\x96\x8b',
+        '\xe2\x96\x8a',
+        '\xe2\x96\x89',
+        '\xe2\x96\x88')
+_filblok_shade = (
+        '\xe2\x96\x91',
+        '\xe2\x96\x92',
+        '\xe2\x96\x93',
+        '\xe2\x96\x88')
+_filblok_ascii = ('-', '=')
+
 def _term_add_bar(bar_max_length, pc):
     if pc < 0: pc = 0
     if pc > 1: pc = 1
 
     blen = bar_max_length
-    bar  = '='*int(blen * pc)
-    if (blen * pc) - int(blen * pc) >= 0.5:
-        bar += '-'
-    return '[%-*.*s]' % (blen, blen, bar)
+    num = int(blen * pc)
+
+    if sys.stdout.encoding == 'UTF-8':
+        fil = _filblok_left2right
+        # fil = _filblok_shade
+    else:
+        fil = _filblok_ascii
+
+    bar  = fil[-1] * num
+    rem = (blen * pc) - int(blen * pc)
+    # rem is between 0 and 1, Eg. 0.1234
+    # See how many elements of fil we can use, should be between 0 and len-1.
+    rem = int(rem / (1.0 / len(fil)))
+    if rem:
+        bar += fil[rem-1]
+        num += 1
+    bar += ' ' * (blen - num)
+
+    return '[%s]' % bar
 
 def shorten_text(text, size):
     if len(text) <= size:
@@ -1728,7 +1759,7 @@ def _walk_stat_vfsd_mpb_(vfsd, ui, progress):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_mpe_(vfs, ui, progress)
+            _walk_stat_vfsd_mpb_(vfs, ui, progress)
 
     if progress is not None:
         progress[1] += 1
@@ -1741,7 +1772,7 @@ def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_mpb_(vfs, ui, progress)
+            _walk_stat_vfsd_mpe_(vfs, ui, progress)
 
     if progress is not None:
         progress[1] += 1
@@ -2134,7 +2165,7 @@ def main():
     cmd = 'unknown'
     if len(cmds) >= 1:
         cmd = remap_cmds.get(cmds[0], cmds[0])
-    if cmd not in all_cmds:
+    if cmd not in all_cmds and not cmd.startswith("debug-"):
         argp.print_help()
         sys.exit(1)
 
@@ -2403,6 +2434,29 @@ def main():
             print >>sys.stderr, "\nRemoving: ", snap_fn
             _unlink_f(snap_fn)
             raise
+
+    elif cmd == 'debug-test-progress':
+        if len(cmds) < 5:
+            wait = 1.0
+        else:
+            wait = int(cmds[4])
+        if len(cmds) < 4:
+            interval = 1.0
+        else:
+            interval = int(cmds[3])
+        if len(cmds) < 3:
+            num = 0.0
+        else:
+            num = int(cmds[2])
+        if len(cmds) < 2:
+            total = 100.0
+        else:
+            total = int(cmds[1])
+
+        while num < total:
+            _stupid_progress("PRE", total, num, "TEXT")
+            time.sleep(wait)
+            num += interval
 
     elif cmd == 'help':
         argp.print_help()
