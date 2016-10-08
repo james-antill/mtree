@@ -1728,7 +1728,7 @@ def _walk_stat_vfsd_mpb_(vfsd, ui, progress):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_(vfs, ui, progress)
+            _walk_stat_vfsd_mpe_(vfs, ui, progress)
 
     if progress is not None:
         progress[1] += 1
@@ -1741,7 +1741,7 @@ def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_(vfs, ui, progress)
+            _walk_stat_vfsd_mpb_(vfs, ui, progress)
 
     if progress is not None:
         progress[1] += 1
