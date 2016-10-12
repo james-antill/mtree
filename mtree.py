@@ -6,6 +6,8 @@ __version_info__ = tuple([ int(num) for num in __version__.split('.')])
 import ctypes
 import sys
 
+def fake_readdir(path=None):
+    return [(x, 'UNKNOWN', -1L) for x in os.listdir(path)]
 try:
     # akfa
     import pyreaddir
@@ -13,8 +15,8 @@ try:
     # print "JDBG:", "Using C readdir"
 except:
     # print "JDBG:", "Using fake readdir"
-    def readdir(path=None):
-        return [(x, 'UNKNOWN', -1L) for x in os.listdir(path)]
+    pyreaddir = None
+    readdir = fake_readdir
 
 try:
     # akfa
@@ -2550,10 +2552,53 @@ def main():
         else:
             total = int(cmds[1])
 
+        p = Prog("PRE", total)
         while num < total:
-            _stupid_progress("PRE", total, num, "TEXT")
+            p.progress(num, "TEXT")
             time.sleep(wait)
             num += interval
+
+    elif cmd == 'debug-test-walk':
+        if len(cmds) < 3:
+            T = "pyreaddir"
+        else:
+            T = cmds[2]
+        if len(cmds) < 2:
+            path = "."
+        else:
+            path = cmds[1]
+
+        if T in ("os", "os-nostat"):
+            global readdir
+            readdir = fake_readdir
+
+        if readdir is fake_readdir:
+            print "Using OS walk"
+        else:
+            assert readdir is pyreaddir.readdir
+
+        if True:
+            roots = {}
+            names = _path2names(path)
+            parent = _names2parent(roots, names)
+            name = names[-1]
+
+            vfs = _name2vfs(roots, parent, 'd', name)
+            _jdbgb("walk")
+            _walk(vfs, ui=opts.ui)
+            _jdbge("walk")
+
+        if T not in ("os-nostat", 'nostat'):
+            _setup_arg_mp(opts)
+
+            _jdbgb("walk stat")
+            if mp_workers is None:
+                _walk_stat_vfsd(vfs, ui=opts.ui)
+            else:
+                _walk_stat_vfsd_mp(vfs, ui=opts.ui)
+            _jdbge("walk stat")
+
+            print vfs, vfs.num
 
     elif cmd == 'help':
         argp.print_help()
