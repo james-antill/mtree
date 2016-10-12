@@ -796,6 +796,8 @@ def find_node(root, path):
         vfs = vfs.nodes[name]
     return vfs
 
+# Unicode Block Elements
+# http://www.fileformat.info/info/unicode/block/block_elements/utf8test.htm
 _filblok_left2right = (
         '\xe2\x96\x8f',
         '\xe2\x96\x8e',
@@ -810,6 +812,15 @@ _filblok_shade = (
         '\xe2\x96\x92',
         '\xe2\x96\x93',
         '\xe2\x96\x88')
+_filblok_down2up = (
+        '\xe2\x96\x81',
+        '\xe2\x96\x82',
+        '\xe2\x96\x83',
+        '\xe2\x96\x84',
+        '\xe2\x96\x85',
+        '\xe2\x96\x86',
+        '\xe2\x96\x87',
+        '\xe2\x96\x88')
 _filblok_ascii = ('-', '=')
 
 def _term_add_bar(bar_max_length, pc):
@@ -821,6 +832,7 @@ def _term_add_bar(bar_max_length, pc):
 
     if sys.stdout.encoding == 'UTF-8':
         fil = _filblok_left2right
+        # fil = _filblok_down2up
         # fil = _filblok_shade
     else:
         fil = _filblok_ascii
@@ -847,41 +859,79 @@ def shorten_text(text, size):
         return text[:half] + '...' + text[-size:]
     return text[:half] + text[-size:]
 
-_stupid_progress_last = None
-def _stupid_progress_beg():
-      global _stupid_progress_last
-      if _stupid_progress_last is None:
-          _stupid_progress_last = time.time()
-      now = time.time()
-      if now - _stupid_progress_last < 0.25:
+class Prog:
+    def __init__(self, prefix, total, output_func=None, every=1, elapse=0.25):
+        self.prefix = prefix
+        self.total  = total
+        self.output_func = output_func
+        self.every = every
+        self.elapse = elapse
+
+        self._tm_beg  = time.time()
+        self._tm_last = self._tm_beg + 0.1
+
+        self._last_num = 0
+        self._last_tm  = 0
+
+        if self.output_func is None:
+            self.output_func = lambda x: x
+
+    def _chk(self, num):
+        if num == self.total:
+            self._last_num = num
+            self._last_tm  = time.time()
+            return True
+
+        if num - self._last_num < self.every:
+            return False
+
+        now = time.time()
+        if now - self._last_tm < self.elapse:
           return False
-      _stupid_progress_last = now
-      return True
-def _stupid_progress(pre, total, num, text):
-      if not _stupid_progress_beg():
-          return
-      ui_tot = _ui_num(total)
-      mnum = len(ui_tot)
-      left = 79 - (len(pre) + mnum + 1 + mnum + 1 + 3 + 2 + 18 + 1)
-      text = shorten_text(text, left)
-      perc = float(num) / float(total)
-      textperc = _term_add_bar(16, perc)
-      perc = int(100 * perc)
-      print '%s%*s/%*s %3u%% %s %-*s\r' % (pre,
-                                         mnum, _ui_num(num), mnum, ui_tot, perc,
-                                         textperc, left, text),
-      sys.stdout.flush()
-def _stupid_up_progress(pre, num, text):
-      if not _stupid_progress_beg():
-          return
-      mnum = max(3, len(_ui_num(num)))
-      left = 79 - (len(pre) + mnum + 1)
-      text = shorten_text(text, left)
-      print '%s%*s %-*s\r' % (pre, mnum, _ui_num(num), left, text),
-      sys.stdout.flush()
-def _stupid_progress_end():
-     print ' ' * 79, '\r',
-     sys.stdout.flush()
+
+        self._last_num = num
+        self._last_tm  = now
+        return True
+
+    def progress_up(self, num, val):
+        if not self._chk(num):
+            return
+        text = self.output_func(val)
+
+        mnum = max(3, len(_ui_num(num)))
+        left = 79 - (len(self.prefix) + mnum + 3 + mnum + 1)
+        text = shorten_text(text, left)
+        secs = self._last_tm - self._tm_beg
+        print '%s%*s/s %*s %-*s\r' % (self.prefix, mnum, _ui_num(num / secs),
+                                      mnum, _ui_num(num), left, text),
+        sys.stdout.flush()
+
+    def progress(self, num, val):
+        if not self._chk(num):
+            return
+        text = self.output_func(val)
+
+        ui_tot = _ui_num(self.total)
+        mnum = len(ui_tot)
+        left = 79 - (len(self.prefix) + mnum + 3 + mnum + 1 + 3 + 2 + 18 + 1)
+        text = shorten_text(text, left)
+        perc = float(num) / float(self.total)
+        textperc = _term_add_bar(16, perc)
+        perc = int(100 * perc)
+        secs = self._last_tm - self._tm_beg
+
+        print '%s%*s/s %*s %3u%% %s %-*s\r' % (self.prefix,
+                                               mnum, _ui_num(num / secs), mnum,
+                                               ui_tot, perc,
+                                               textperc, left, text),
+        sys.stdout.flush()
+
+
+    def end(self):
+        print ' ' * 79, '\r',
+        sys.stdout.flush()
+        self._last_num = 0
+        self._last_tm  = 0
 
 def _ui_path(vfs):
     if False:
@@ -928,17 +978,17 @@ def _walk_(vfsd, ui, progress):
         if isdir:
             _walk_(vfs, ui, progress)
         if progress is not None:
-            progress[1] += 1
-            _stupid_up_progress("Walk: ", progress[1],
-                                _ui_path(vfsd))
+            progress[0] += 1
+            progress[1].progress_up(progress[0], vfsd)
+
 def _walk(vfsd, ui=False):
     """ Walk the FS, adding nodes for each. """
     progress = None
     if ui:
-        progress = [vfsd, 0]
+        progress = [0, Prog("Walk: ", 0, _ui_path)]
     _walk_(vfsd, ui, progress)
     if progress is not None:
-        _stupid_progress_end()
+        progress[1].end()
 
 def _valid_cached_dirs(vfsd, verbose=False):
     ret = True
@@ -1367,8 +1417,7 @@ def _cache_read_(vfsd, verify_cached="nsm", verbose=False, progress=None):
         if progress is not None:
             progress[1] += 1
             tot = progress[0].num
-            _stupid_progress("Cache: ", tot, progress[1],
-                             _ui_path(vfs))
+            progress[2].progress(progress[1], vfs)
         if isinstance(vfs, VFS_d):
             _cache_read_(vfs, verify_cached, verbose, progress)
             # continue # More checks??
@@ -1399,7 +1448,7 @@ def _cache_read_chk(vfs, verify_cached, verbose, progress, try_nodes):
         assert vfs._stat is not None
 
         if False and len(try_nodes) >= 10:
-            _stupid_progress_end()
+            progress[2].end()
             print >>sys.stderr, "Cache: lots:", vfs.name, len(try_nodes)
             if len(try_nodes) > 1000: akfjaljfdlajlkdsajf
 
@@ -1478,10 +1527,10 @@ def _cache_read(vfsd, verify_cached="nsm", verbose=False, ui=False):
         print >>sys.stderr, "Cache: verify:", verify_cached
     progress = None
     if ui and not verbose:
-        progress = [vfsd, 0]
+        progress = [vfsd, 0, Prog("Cache: ", vfsd.num, _ui_path)]
     _cache_read_(vfsd, verify_cached, verbose, progress)
     if progress is not None:
-        _stupid_progress_end()
+        progress[2].end()
 
 # http://serverfault.com/questions/292014/preferred-format-of-file-names-which-include-a-timestamp
 def _sys_time(tm):
@@ -1502,6 +1551,7 @@ def _ui_lnum(num):
     return locale.format("%d", int(num), True)
 
 def _ui_num(num):
+    num = int(num)
     if num < 1000:
         return "%7s" % num
 
@@ -1670,9 +1720,7 @@ def _walk_checksum_vfsd_(vfsd, ui, progress):
         if not isinstance(vfsd, VFS_d):
             half = int(vfsd.size / 2)
             progress[1] += half
-        tot = progress[0]
-        _stupid_progress("Sum: ", tot, progress[1],
-                         _ui_path(vfsd))
+        progress[2].progress(progress[1], vfsd)
         if not isinstance(vfsd, VFS_d):
             progress[1] += vfsd.size - half
     vfsd.checksums()
@@ -1682,20 +1730,21 @@ def _walk_checksum_vfsd(vfsd, ui=False):
     _walk_checksum_vfsd_prop(vfsd)
     progress = None
     if ui:
-        progress = [0, 0]
+        progress = [0]
         _walk_checksum_vfsd_calc(vfsd, progress)
+        progress = [progress[0], 0, Prog("Sum: ", progress[0], _ui_path)]
     _walk_checksum_vfsd_(vfsd, ui, progress)
     if progress is not None:
-        _stupid_progress_end()
+        progress[2].end()
 
-def _walk_checksum_vfsd_mp_(vfsd, ui, progress, working):
+def _walk_checksum_vfsd_mpb_(vfsd, ui, progress, working):
     " Internal Worker. "
     if vfsd._checksum is not None:
         return
 
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_checksum_vfsd_mp_(vfs, ui, progress, working)
+            _walk_checksum_vfsd_mpb_(vfs, ui, progress, working)
 
     if progress is not None:
         progress[1] += 1
@@ -1703,8 +1752,7 @@ def _walk_checksum_vfsd_mp_(vfsd, ui, progress, working):
             half = int(vfsd.size / 2)
             progress[1] += half
         tot = progress[0]
-        _stupid_progress("SumMP: ", tot, progress[1],
-                         _ui_path(vfsd))
+        progress[2].progress(progress[1], vfsd)
 
     if not vfsd.async_checksum_beg():
         if progress is not None:
@@ -1715,31 +1763,15 @@ def _walk_checksum_vfsd_mp_(vfsd, ui, progress, working):
 
     working.append(vfsd)
     if len(working) > max(mp_worker_num, 256):
-        nworking = []
-        done = False
-        for ovfsd in working:
-            if not ovfsd.async_checksum_ready():
-                nworking.append(ovfsd)
-                continue
-
-            done = True
+        while working and working[0].async_checksum_ready():
+            ovfsd = working.pop(0)
             if progress is not None:
                 if not isinstance(ovfsd, VFS_d):
                     half = int(ovfsd.size / 2)
                     progress[1] += ovfsd.size - half
             ovfsd.async_checksum_end()
-        if done:
-            working[:] = nworking
 
-def _walk_checksum_vfsd_mp(vfsd, ui=False):
-    """ Walk the tree and ask for checksums. """
-    _walk_checksum_vfsd_prop(vfsd)
-    progress = None
-    if ui:
-        progress = [0, 0]
-        _walk_checksum_vfsd_calc(vfsd, progress)
-    working = []
-    _walk_checksum_vfsd_mp_(vfsd, ui, progress, working)
+def _walk_checksum_vfsd_mpe_(vfsd, ui, progress, working):
     for ovfsd in working:
         ovfsd.async_checksum_end()
         if progress is not None:
@@ -1747,11 +1779,22 @@ def _walk_checksum_vfsd_mp(vfsd, ui=False):
                 half = int(ovfsd.size / 2)
                 progress[1] += ovfsd.size - half
             tot = progress[0]
-            _stupid_progress("SumMP: ", tot, progress[1],
-                             _ui_path(ovfsd))
+            progress[2].progress(progress[1], ovfsd)
+
+def _walk_checksum_vfsd_mp(vfsd, ui=False):
+    """ Walk the tree and ask for checksums. """
+    _walk_checksum_vfsd_prop(vfsd)
+    progress = None
+    if ui:
+        progress = [0]
+        _walk_checksum_vfsd_calc(vfsd, progress)
+        progress = [progress[0], 0, Prog("SumMP: ", progress[0], _ui_path)]
+    working = []
+    _walk_checksum_vfsd_mpb_(vfsd, ui, progress, working)
+    _walk_checksum_vfsd_mpe_(vfsd, ui, progress, working)
 
     if progress is not None:
-        _stupid_progress_end()
+        progress[2].end()
 
 def _walk_stat_vfsd_(vfsd, ui, progress):
     " Internal Worker. "
@@ -1760,56 +1803,81 @@ def _walk_stat_vfsd_(vfsd, ui, progress):
             _walk_stat_vfsd_(vfs, ui, progress)
 
     if progress is not None:
-        progress[1] += 1
-        tot = progress[0].num
-        _stupid_progress("Stat: ", tot, progress[1],
-                         _ui_path(vfsd))
+        progress[0] += 1
+        progress[1].progress(progress[0], vfsd)
     vfsd.mtime
 
 def _walk_stat_vfsd(vfsd, ui=False):
     """ Walk the tree and ask for stat data. """
     progress = None
     if ui:
-        progress = [vfsd, 0]
+        progress = [0, Prog("Stat: ", vfsd.num, _ui_path)]
     _walk_stat_vfsd_(vfsd, ui, progress)
     if progress is not None:
-        _stupid_progress_end()
+        progress[1].end()
 
-def _walk_stat_vfsd_mpb_(vfsd, ui, progress):
+def _walk_stat_vfsd_mpb_(vfsd, ui, progress, working):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_mpb_(vfs, ui, progress)
+            _walk_stat_vfsd_mpb_(vfs, ui, progress, working)
 
     if progress is not None:
         progress[1] += 1
-        tot = progress[0].num * 2
-        _stupid_progress("StatMP: ", tot, progress[1],
-                         _ui_path(vfsd))
+        progress[2].progress(progress[1], vfsd)
     vfsd.async_stat_beg()
 
-def _walk_stat_vfsd_mpe_(vfsd, ui, progress):
+def _walk_stat_vfsd_mpe_(vfsd, ui, progress, working):
+    " Internal Worker. "
+    assert not working
+    if isinstance(vfsd, VFS_d):
+        for vfs in vfsd:
+            _walk_stat_vfsd_mpe_(vfs, ui, progress, working)
+ 
+    if progress is not None:
+        progress[1] += 1
+        progress[2].progress(progress[1], vfsd)
+    vfsd.async_stat_end()
+
+def _walk_stat_vfsd_mpex_(vfsd, ui, progress, working, lim=0, ready=True):
+    " Internal Worker. "
+    if len(working) > lim:
+        while working and (ready or working[0].async_stat_ready()):
+            ovfsd = working.pop(0)
+            ovfsd.async_stat_end()
+            if progress is not None:
+                progress[1] += 1
+                progress[2].progress(progress[1], vfsd)
+
+def _walk_stat_vfsd_mpbx_(vfsd, ui, progress, working):
     " Internal Worker. "
     if isinstance(vfsd, VFS_d):
         for vfs in vfsd:
-            _walk_stat_vfsd_mpe_(vfs, ui, progress)
+            _walk_stat_vfsd_mpbx_(vfs, ui, progress, working)
 
     if progress is not None:
         progress[1] += 1
-        tot = progress[0].num * 2
-        _stupid_progress("StatMP: ", tot, progress[1],
-                         _ui_path(vfsd))
-    vfsd.async_stat_end()
+        progress[2].progress(progress[1], vfsd)
+
+    if not vfsd.async_stat_beg():
+        if progress is not None:
+            progress[1] += 1
+        return
+
+    working.append(vfsd)
+    _walk_stat_vfsd_mpex_(vfsd, ui, progress, working,
+                          lim=max(mp_worker_num, 256), ready=False)
 
 def _walk_stat_vfsd_mp(vfsd, ui=False):
     """ Walk the tree and ask for stat data. """
     progress = None
     if ui:
-        progress = [vfsd, 0]
-    _walk_stat_vfsd_mpb_(vfsd, ui, progress)
-    _walk_stat_vfsd_mpe_(vfsd, ui, progress)
+        progress = [vfsd, 0, Prog("StatMP: ", vfsd.num * 2, _ui_path)]
+    working = []
+    _walk_stat_vfsd_mpbx_(vfsd, ui, progress, working)
+    _walk_stat_vfsd_mpex_(vfsd, ui, progress, working)
     if progress is not None:
-        _stupid_progress_end()
+        progress[2].end()
 
 def _cmp_chksum_eq(vfs1, vfs2):
     vfs1chk = vfs1.checksums()[primary_checksum]
@@ -2009,6 +2077,18 @@ def _setup_argp(all_cmds):
 
     return argp, argp.parse_args()
 
+def _setup_arg_mp(opts):
+    global mp_worker_num
+    global mp_workers
+
+    if opts.mp is None:
+        mp_worker_num = _num_cpus_online()
+        print "Workers:", mp_worker_num
+    elif opts.mp > 0:
+        mp_worker_num = opts.mp
+    if mp_worker_num:
+        mp_workers = multiprocessing.Pool(mp_worker_num)
+
 def _setup_arg_checksum(opts):
     global _available_checksums
     global primary_checksum
@@ -2165,13 +2245,6 @@ def main():
         _prnt_diff_dir_mod = False
         _prnt_diff_reg_mod = False
 
-    if opts.mp is None:
-        mp_worker_num = _num_cpus_online() * 4
-    elif opts.mp > 0:
-        mp_worker_num = opts.mp
-    if mp_worker_num:
-        mp_workers = multiprocessing.Pool(mp_worker_num)
-
     last_matched_chop = opts.chop_diff
 
     _setup_arg_checksum(opts)
@@ -2185,7 +2258,7 @@ def main():
     cmd = 'unknown'
     if len(cmds) >= 1:
         cmd = remap_cmds.get(cmds[0], cmds[0])
-    if cmd not in all_cmds and not cmd.startswith("debug-"):
+    if cmd not in all_cmds and not cmd.startswith("debug-test-"):
         argp.print_help()
         sys.exit(1)
 
@@ -2235,6 +2308,8 @@ def main():
             _walk(vfs, ui=opts.ui)
             _jdbge("walk")
 
+            # _setup_arg_mp(opts) -- slower :(
+
             _jdbgb("walk stat")
             if mp_workers is None:
                 _walk_stat_vfsd(vfs, ui=opts.ui)
@@ -2245,6 +2320,8 @@ def main():
             _jdbgb("cached read")
             _cache_read(vfs, opts.verify_cached, opts.verbose, ui=opts.ui)
             _jdbge("cached read")
+
+            _setup_arg_mp(opts)
 
             _jdbgb("walk checksums")
             if mp_workers is None:
