@@ -726,7 +726,7 @@ def _names2parent(roots, names, readonly=False):
             parent = roots[name]
         else:
             if name not in parent.nodes:
-                parent.nodes[name] = VFS_d(parent, name, readonly=readonly)
+                parent.add(VFS_d(parent, name, readonly=readonly))
             parent = parent.nodes[name]
     return parent
 
@@ -2332,12 +2332,15 @@ def main():
                 _walk_checksum_vfsd_mp(vfs, ui=opts.ui)
             _jdbge("walk checksums")
 
-            _jdbgb("prnt vfsd")
-            _prnt_vfsd(out, vfs, info=info)
-            _jdbge("prnt vfsd")
             _jdbgb("prnt vfs")
             _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
             _jdbge("prnt vfs")
+         if len(roots) == 1:
+             _jdbgb("prnt vfsd")
+             _prnt_vfsd(out, _root2useful(roots[roots.keys()[0]]), info=info)
+             _jdbge("prnt vfsd")
+         else:
+             print len(roots), roots
         except KeyboardInterrupt, e:
             print >>sys.stderr, "\nRemoving: ", snap_fn
             _unlink_f(snap_fn)
@@ -2390,7 +2393,8 @@ def main():
             if done: print ''
             done = True
             _jdbg("pre prnt")
-            _prnt_vfsd(sys.stdout, root, ifields, ui=opts.ui, tree=cmd=='tree')
+            _prnt_vfsd(sys.stdout, _root2useful(root),
+                       ifields, ui=opts.ui, tree=cmd=='tree')
         _jdbg("end")
 
     elif cmd in ('difference', 'tree-difference'):
