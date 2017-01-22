@@ -856,9 +856,15 @@ def shorten_text(text, size):
         return text
     half = size / 2
     size -= half
-    if half > 3:
-        half -= 3
-        return text[:half] + '...' + text[-size:]
+
+    el = "..."
+    els = 3
+    if sys.stdout.encoding == 'UTF-8':
+        el = '\xe2\x80\xa6'
+        els = 1
+    if half > els:
+        half -= els
+        return text[:half] + el + text[-size:]
     return text[:half] + text[-size:]
 
 class Prog:
