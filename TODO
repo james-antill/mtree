@@ -1,11 +1,5 @@
 save progress
 checksum bytes progress
-utf8 for text shortening in progress
-
-MPROC
-        stat files
-        checksum files
-        readdir?
 
 load mtree files from C?
 
