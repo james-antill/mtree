@@ -2129,10 +2129,10 @@ def _setup_arg_checksum(opts):
 
             if chk in ('def', 'default'):
                 if 'md5' in _available_checksums:
-                    primary_checksum = chk = 'md5'
+                    chk = 'md5'
                     nchks.extend(['md5', 'sha256', 'sha512'])
                 else:
-                    primary_checksum = chk = 'sha1'
+                    chk = 'sha1'
                     nchks.extend(['sha1', 'sha256', 'sha512'])
 
             if chk not in _available_checksums:
