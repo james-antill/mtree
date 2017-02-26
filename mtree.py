@@ -1674,7 +1674,7 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
     if 'i' in info:
         fo.write("%s %d\n"  % ('I:',  vfs.st_uid))
     if 'l' in info:
-        fo.write("%s %d\n"  % ('L:',  _muil(vfs.st_nlink)))
+        fo.write("%s %s\n"  % ('L:',  _muil(vfs.st_nlink)))
     if 'mo' in info:
         if ui:
             fo.write("%s %#o (%s)\n" % ('MO:', vfs.st_mode, _ui_mode(vfs.st_mode)))
