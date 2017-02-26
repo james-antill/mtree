@@ -3,6 +3,11 @@ checksum bytes progress
 
 load mtree files from C?
 
+hash->list to stdout
+hash->info to stdout?
+search for hash
+list specific hash?
+
 cut / prune / yank / whatever
 find tree?
 diff metadata? (modes/uid/etc.)

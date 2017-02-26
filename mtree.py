@@ -2107,6 +2107,8 @@ def _setup_arg_checksum(opts):
     global primary_checksum
     global primary_checksum_ui_len
 
+    if opts.ui_checksum_length == 0:
+        primary_checksum_ui_len = None
     if opts.ui_checksum_length > 0:
         primary_checksum_ui_len = opts.ui_checksum_length
 
