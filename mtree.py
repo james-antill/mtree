@@ -2094,6 +2094,9 @@ def _setup_arg_mp(opts):
     global mp_worker_num
     global mp_workers
 
+    if mp_workers is not None:
+        return
+
     if opts.mp is None:
         mp_worker_num = _num_cpus_online()
         print "Workers:", mp_worker_num
@@ -2236,8 +2239,21 @@ def main():
                   'tree-diff' : 'tree-difference',
                   'treedifference' : 'tree-difference',
                   'snap' : 'snapshot',
+                  'dir-ls' : 'directory-list',
+                  'dir-info' : 'directory-information',
+                  'dirls' : 'directory-list',
+                  'dirlist' : 'directory-list',
+                  'dirinfo' : 'directory-information',
+                  'dirtree' : 'directory-tree',
+                  'directory-ls' : 'directory-list',
+                  'directory-info' : 'directory-information',
+                  'directoryls' : 'directory-list',
+                  'directorylist' : 'directory-list',
+                  'directoryinfo' : 'directory-information',
+                  'directorytree' : 'directory-tree',
                   }
     all_cmds = ("summary", "list", "information", "difference",
+                "directory-list", "directory-information", "directory-tree",
                 "snapshot", "check", "tree", "tree-difference", "resave", "help")
 
     (argp, (opts, cmds)) = _setup_argp(all_cmds)
@@ -2285,7 +2301,7 @@ def main():
 
     elif cmd == 'snapshot':
         if len(cmds) < 3:
-            print >>sys.stderr, "Format: %s %s <filename> <tree> [...]" % (prog, cmds[0])
+            print >>sys.stderr, "Format: %s %s <filename> <path> [...]" % (prog, cmds[0])
             sys.exit(1)
 
         info = set(['p', 'c', 's', 'num', 'mt',
@@ -2408,6 +2424,66 @@ def main():
             _jdbg("pre prnt")
             _prnt_vfsd(sys.stdout, _root2useful(root),
                        ifields, ui=opts.ui, tree=cmd=='tree')
+        _jdbg("end")
+
+    elif cmd in ('directory-information', 'directory-list', 'directory-tree'):
+        _jdbg("dir")
+        if len(cmds) < 2:
+            print >>sys.stderr, "Format: %s %s <path> [...]" % (prog, cmds[0])
+            sys.exit(1)
+
+        data_only = False
+        if cmd in ('directory-list', 'directory-tree'):
+            data_only = True
+            ifields = False
+
+        roots = {}
+        vfses = set()
+        for path in cmds[1:]:
+            names = _path2names(path)
+            parent = _names2parent(roots, names)
+            name = names[-1]
+
+            if not os.path.isdir(path):
+                _name2vfs(roots, parent, 'f', name)
+                vfs = parent
+            else:
+                vfs = _name2vfs(roots, parent, 'd', name)
+
+                _jdbgb("walk")
+                _walk(vfs, ui=opts.ui)
+                _jdbge("walk")
+
+            vfses.add(vfs)
+        for vfs in vfses:
+            # _setup_arg_mp(opts) -- slower :(
+
+            _jdbgb("walk stat")
+            if mp_workers is None:
+                _walk_stat_vfsd(vfs, ui=opts.ui)
+            else:
+                _walk_stat_vfsd_mp(vfs, ui=opts.ui)
+            _jdbge("walk stat")
+
+            _jdbgb("cached read")
+            _cache_read(vfs, opts.verify_cached, opts.verbose, ui=opts.ui)
+            _jdbge("cached read")
+
+            _setup_arg_mp(opts)
+
+            _jdbgb("walk checksums")
+            if mp_workers is None:
+                _walk_checksum_vfsd(vfs, ui=opts.ui)
+            else:
+                _walk_checksum_vfsd_mp(vfs, ui=opts.ui)
+            _jdbge("walk checksums")
+
+            if done: print ''
+            done = True
+            _jdbg("pre prnt")
+            _prnt_vfsd(sys.stdout, _root2useful(vfs),
+                       ifields, ui=opts.ui, tree=cmd=='dir-tree')
+
         _jdbg("end")
 
     elif cmd in ('difference', 'tree-difference'):
