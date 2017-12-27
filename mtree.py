@@ -2529,10 +2529,12 @@ def main():
         treecmd = cmd=='tree-difference'
         if len(roots1) == 1 and len(roots2) == 1:
             root1 = roots1.values()[0]
+            root1 = _root2useful(root1)
             root2 = roots2.values()[0]
+            root2 = _root2useful(root2)
 
             if _cmp_chksum_eq(root1, root2):
-                _ui_prnt_root(_root2useful(root1), ui=opts.ui, prefix="Equal:")
+                _ui_prnt_root(root1, ui=opts.ui, prefix="Equal:")
             else:
                 _prnt_diff_vfsds(sys.stdout, root1, root2, ui=opts.ui, tree=treecmd)
         else:
