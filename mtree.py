@@ -1685,13 +1685,16 @@ def _prnt_vfs(fo, vfs, info=False, ui=False, tree=False, size_prefix=''):
     if 'ct' in info:
         fo.write("%s %s\n"  % ('CT:', _muit(vfs.st_ctime, vfs.st_ctime_ns)))
 
-def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False):
-    _prnt_vfs(fo, vfsd, info, ui, tree)
-    if not isinstance(vfsd, VFS_d):
+def _prnt_vfsd(fo, vfsd, info=False, ui=False, tree=False, leaf_only=False):
+    isdir = isinstance(vfsd, VFS_d)
+
+    if not leaf_only or not isdir or vfsd.num == 0:
+        _prnt_vfs(fo, vfsd, info, ui, tree)
+    if not isdir:
         return
 
     for vfs in vfsd:
-        _prnt_vfsd(fo, vfs, info, ui, tree)
+        _prnt_vfsd(fo, vfs, info, ui, tree, leaf_only)
 
 def _walk_checksum_vfsd_prop(vfsd):
     " Internal Worker. "
@@ -2084,7 +2087,7 @@ def _setup_argp(all_cmds):
             help='fields to show in info command')
     argp.add_option('--data-only',
             action='store_true', default=False,
-            help='use only the data fields for everything, including snaps')
+            help='use only the data, info=data,mt no saving middle dirs.')
     argp.add_option('--info', dest="info_fields",
             help=optparse.SUPPRESS_HELP)
 
@@ -2361,15 +2364,18 @@ def main():
                 _walk_checksum_vfsd_mp(vfs, ui=opts.ui)
             _jdbge("walk checksums")
 
-            _jdbgb("prnt vfs")
-            _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
-            _jdbge("prnt vfs")
          if len(roots) == 1:
              _jdbgb("prnt vfsd")
-             _prnt_vfsd(out, _root2useful(roots[roots.keys()[0]]), info=info)
+             vfs = _root2useful(roots[roots.keys()[0]])
+             _prnt_vfsd(out, vfs, info=info, leaf_only=opts.data_only)
              _jdbge("prnt vfsd")
+
+             _jdbgb("prnt vfs")
+             _prnt_vfs(sys.stdout, vfs, ui=opts.ui)
+             _jdbge("prnt vfs")
+
          else:
-             print len(roots), roots
+             print "Multiple ROOTs FAIL!", len(roots), roots
         except KeyboardInterrupt, e:
             print >>sys.stderr, "\nRemoving: ", snap_fn
             _unlink_f(snap_fn)
