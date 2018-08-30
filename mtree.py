@@ -2242,12 +2242,17 @@ def main():
                   'tree-diff' : 'tree-difference',
                   'treedifference' : 'tree-difference',
                   'snap' : 'snapshot',
-                  'dir-ls' : 'directory-list',
-                  'dir-info' : 'directory-information',
+                  'dir' : 'directory-summary',
+                  'dirsum' : 'directory-summary',
+                  'dir-sum' : 'directory-summary',
                   'dirls' : 'directory-list',
-                  'dirlist' : 'directory-list',
+                  'dir-ls' : 'directory-list',
                   'dirinfo' : 'directory-information',
+                  'dir-info' : 'directory-information',
+                  'dirlist' : 'directory-list',
+                  'dir-list' : 'directory-list',
                   'dirtree' : 'directory-tree',
+                  'dir-tree' : 'directory-tree',
                   'directory-ls' : 'directory-list',
                   'directory-info' : 'directory-information',
                   'directoryls' : 'directory-list',
@@ -2257,6 +2262,7 @@ def main():
                   }
     all_cmds = ("summary", "list", "information", "difference",
                 "directory-list", "directory-information", "directory-tree",
+                "directory-summary",
                 "snapshot", "check", "tree", "tree-difference", "resave", "help")
 
     (argp, (opts, cmds)) = _setup_argp(all_cmds)
@@ -2432,14 +2438,15 @@ def main():
                        ifields, ui=opts.ui, tree=cmd=='tree')
         _jdbg("end")
 
-    elif cmd in ('directory-information', 'directory-list', 'directory-tree'):
+    elif cmd in ('directory-information', 'directory-list', 'directory-tree',
+                 'directory-summary'):
         _jdbg("dir")
         if len(cmds) < 2:
             print >>sys.stderr, "Format: %s %s <path> [...]" % (prog, cmds[0])
             sys.exit(1)
 
         data_only = False
-        if cmd in ('directory-list', 'directory-tree'):
+        if cmd in ('directory-list', 'directory-tree', 'directory-summary'):
             data_only = True
             ifields = False
 
@@ -2487,8 +2494,11 @@ def main():
             if done: print ''
             done = True
             _jdbg("pre prnt")
-            _prnt_vfsd(sys.stdout, _root2useful(vfs),
-                       ifields, ui=opts.ui, tree=cmd=='dir-tree')
+            if cmd == 'directory-summary':
+                _ui_prnt_root(_root2useful(vfs), ui=opts.ui)
+            else:
+                _prnt_vfsd(sys.stdout, _root2useful(vfs),
+                           ifields, ui=opts.ui, tree=cmd=='dir-tree')
 
         _jdbg("end")
 
