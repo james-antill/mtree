@@ -2107,7 +2107,8 @@ def _setup_arg_mp(opts):
 
     if opts.mp is None:
         mp_worker_num = _num_cpus_online()
-        print "Workers:", mp_worker_num
+        if opts.verbose:
+            print "Workers:", mp_worker_num
     elif opts.mp > 0:
         mp_worker_num = opts.mp
     if mp_worker_num:
@@ -2215,7 +2216,7 @@ def _setup_arg_cache_load(opts):
 
     return _cached_roots
 
-__jdbg_print__ = True
+__jdbg_print__ = False
 _top_beg = time.time()
 def _jdbg(arg):
     if not __jdbg_print__:
