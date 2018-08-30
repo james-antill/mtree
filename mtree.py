@@ -715,7 +715,12 @@ def _path2names(path):
     if names[0] == '':
         assert path[0] == '/'
         names[0] = '/'
-    return names
+    ret = []
+    for name in names:
+        if name == '':
+            continue
+        ret.append(name)
+    return ret
 
 def _names2parent(roots, names, readonly=False):
     parent = None
