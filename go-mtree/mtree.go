@@ -120,6 +120,8 @@ func checksumSymlink(r *MTnode, kind string) {
 		fmt.Fprintln(os.Stderr, err)
 		data = ""
 	}
+
+	r.csums = nil
 	for _, csum := range csums {
 		c := data2csum(csum, []byte(data))
 		r.csums = append(r.csums, Checksum{csum, c})
@@ -133,7 +135,6 @@ func checksumFile(r *MTnode, kind string) {
 
 	path := r.path()
 
-	// FIXME:
 	ior, err := os.Open(path)
 	if err != nil {
 		r.err = err
@@ -156,6 +157,7 @@ func checksumFile(r *MTnode, kind string) {
 		return
 	}
 
+	r.csums = nil
 	for i, csum := range csums {
 		r.csums = append(r.csums, Checksum{csum, chks[i].Sum(nil)})
 	}
@@ -182,6 +184,11 @@ func (r *MTnode) Checksum(kind string) []byte {
 		return r.Checksum(kind)
 	} else if !r.IsDir() {
 		checksumFile(r, kind)
+		if r.err != nil {
+			c := data2csum(kind, []byte{})
+			r.csums = append(r.csums, Checksum{kind, c})
+			return c
+		}
 		return r.Checksum(kind)
 	}
 
@@ -488,7 +495,7 @@ func Mtree(root string) (*MTnode, error) {
 	var ret *MTnode
 	for r := range c {
 		if r.err != nil {
-			return nil, r.err
+			fmt.Fprintln(os.Stderr, r.err)
 		}
 		if r.name == "/" {
 			ret = r
@@ -675,5 +682,6 @@ func main() {
 
 	default:
 		fmt.Println("Usage: mtree list|summary|tree <dir>")
+		os.Exit(1)
 	}
 }
