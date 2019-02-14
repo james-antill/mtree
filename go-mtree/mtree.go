@@ -525,10 +525,11 @@ func round(x, unit float64) float64 {
 // 1.2MB
 
 func fmtSprint(f float64, ext string) string {
-	if round(f, 0.1) >= 10 {
-		return fmt.Sprintf("%3d%s", int(f), ext)
+	rf := round(f, 0.1)
+	if f == float64(int(f)) || rf >= 10 {
+		return fmt.Sprintf("%3d%s", int(rf), ext)
 	}
-	return fmt.Sprintf("%.1f%s", f, ext)
+	return fmt.Sprintf("%.1f%s", rf, ext)
 }
 
 func formatFKB(f float64) string {
