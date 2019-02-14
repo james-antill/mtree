@@ -646,16 +646,24 @@ func main() {
 
 	if len(flag.Args()) != 2 {
 		flag.PrintDefaults()
-		return
+		os.Exit(1)
 	}
 
 	m, err := Mtree(flag.Arg(1))
 	if err != nil {
-		fmt.Println(err)
-		return
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 
 	switch flag.Arg(0) {
+	case "directory-ls":
+		fallthrough
+	case "directory-list":
+		fallthrough
+	case "dir-ls":
+		fallthrough
+	case "dir-list":
+		fallthrough
 	case "ls":
 		fallthrough
 	case "list":
@@ -663,12 +671,22 @@ func main() {
 		m.parent = nil
 		prntListMtreed(m, false, flagUI, "")
 		m.parent = p
+	case "directory-tree":
+	case "dir-tree":
 	case "tree":
 		p := m.parent
 		m.parent = nil
 		prntListMtreed(m, true, flagUI, "")
 		m.parent = p
 
+	case "directory-sum":
+		fallthrough
+	case "dir-sum":
+		fallthrough
+	case "directory-summary":
+		fallthrough
+	case "dir-summary":
+		fallthrough
 	case "sum":
 		fallthrough
 	case "summary":
