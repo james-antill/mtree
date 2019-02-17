@@ -63,3 +63,22 @@ func TestFormat(t *testing.T) {
 	}
 
 }
+
+func TestHashes(t *testing.T) {
+	data := []byte("some data to hash")
+	res := "0f65fe41fc353e52c55667bb9e2b27bfcc8476f2c413e9437d272ee3194a4e3146d05ec04a25d16b8f577c19b82d16b1424c3e022e783d2b4da98de3658d363d"
+	if ret := b2s(data2csum("shake-256-64", data)); ret != res {
+		t.Errorf("data2csum->shake-256-64 is bad: %s !=\n %s\n",
+			ret, res)
+	}
+	c := chkNew("shake-256-64")
+	if ret := b2s(c.Sum(data)); ret != res {
+		t.Errorf("chkNew->Sum->shake-256-64 is bad: %s !=\n %s\n",
+			ret, res)
+	}
+	c.Write(data)
+	if ret := b2s(c.Sum(nil)); ret != res {
+		t.Errorf("chkNew->Write->shake-256-64 is bad: %s !=\n %s\n",
+			ret, res)
+	}
+}
