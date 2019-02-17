@@ -169,19 +169,22 @@ func checksumFile(r *MTnode, kind string) {
 	}
 }
 
+const hextable = "0123456789abcdef"
+
 // Checksum gives the hash of the directory and all children
 func (r *MTnode) Checksum(kind string) []byte {
-	if !validChecksum(kind) {
-		return nil
-	}
-
 	for _, csum := range r.csums {
 		if csum.Kind == kind {
 			return csum.Data
 		}
 	}
 
-	// Files/symlinks get done in go procs.
+	if !validChecksum(kind) {
+		return nil
+	}
+
+	// Files/symlinks get done in go procs. and combine all caclChecksums
+	// but we still have code here anyway for future.
 
 	// Is a file/symlink...
 	// Checksum the data within the file...
@@ -199,17 +202,36 @@ func (r *MTnode) Checksum(kind string) []byte {
 	}
 
 	// Is a directory...
-	// just merge all the data from all the children...
-	dd := ""
+	// merge all the data from all the children...
+
+	// For large sets this can be slow, so parallel ftw.
+	var wg sync.WaitGroup
 	for _, child := range r.children {
-		dd += child.name
-		dd += " "
-		// FIXME: hex.Encode?
-		dd += fmt.Sprintf("%x", child.Checksum(kind))
-		dd += "\n"
+		if !child.IsDir() {
+			continue
+		}
+		wg.Add(1)
+		go func(c *MTnode) {
+			defer wg.Done()
+			c.Checksum(kind)
+		}(child)
+	}
+	wg.Wait()
+
+	var dd bytes.Buffer
+	for _, child := range r.children {
+		dd.WriteString(child.name)
+		dd.WriteByte(' ')
+		chk := child.Checksum(kind)
+		//		dd += fmt.Sprintf("%x", chk)
+		for _, b := range chk {
+			dd.WriteByte(hextable[b>>4])
+			dd.WriteByte(hextable[b&0x0f])
+		}
+		dd.WriteByte('\n')
 	}
 
-	c := data2csum(kind, []byte(dd))
+	c := data2csum(kind, dd.Bytes())
 	r.csums = append(r.csums, Checksum{kind, c})
 	// Recurse so we know it's cached...
 	// return c
