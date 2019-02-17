@@ -116,7 +116,7 @@ func checksumSymlink(r *MTnode, kind string) {
 	// Currently do all the checksums for files...
 	csums := calcChecksumKinds
 
-	path := r.path()
+	path := r.Path()
 
 	data, err := os.Readlink(path)
 	if err != nil {
@@ -137,7 +137,7 @@ func checksumFile(r *MTnode, kind string) {
 	// Currently do all the checksums for files...
 	csums := calcChecksumKinds
 
-	path := r.path()
+	path := r.Path()
 
 	ior, err := os.Open(path)
 	if err != nil {
@@ -240,7 +240,7 @@ func (r *MTnode) LatestModTime() time.Time {
 	return time.Unix(0, r.latestModNSecs())
 }
 
-// Depth gives the number of children in the directory and all children
+// Depth gives the depth from the root of the child, 0 == root.
 func (r *MTnode) Depth() int {
 	if r.parent == nil {
 		return 0
@@ -264,15 +264,17 @@ func (r *MTnode) dpath() string {
 	return r.parent.dpath() + r.name + "/"
 }
 
-func (r *MTnode) num() int {
+// Num gives the number of children in the directory and all children, not overflow safe.
+func (r *MTnode) Num() int {
 	num := len(r.children)
 	for _, child := range r.children {
-		num += child.num()
+		num += child.Num()
 	}
 	return num
 }
 
-func (r *MTnode) path() string {
+// Path gives the full path to the node
+func (r *MTnode) Path() string {
 	if r.parent == nil {
 		return r.name
 	}
@@ -305,7 +307,7 @@ func ensureDir(m map[string]*MTnode, p string) *MTnode {
 
 	dres := getDirRes(m, p)
 	res := newRes(dres, path.Base(p), os.ModeDir)
-	m[res.path()] = res
+	m[res.Path()] = res
 	return res
 }
 
@@ -377,6 +379,7 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				nr, err := filepath.EvalSymlinks(wroot)
 				if err != nil {
 					errc <- err
+					return
 				}
 				wroot = nr
 			}
@@ -809,13 +812,14 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 		chksum = chksum[:primaryChecksumUILen]
 	}
 
-	fn := r.path()
+	fn := r.Path()
 
 	if tree {
-		if r.Depth() == 0 {
+		depth := r.Depth()
+		if depth == 0 {
 			fn = r.name
 		} else {
-			indent := strings.Repeat(" |  ", r.Depth()-1) + " \\_ "
+			indent := strings.Repeat(" |  ", depth-1) + " \\_ "
 			fn = indent + r.name
 		}
 	}
@@ -828,7 +832,7 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 
 func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 	leafOnly := false
-	if !leafOnly || !r.IsDir() || r.num() == 0 {
+	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
 		prntListMtree(r, tree, ui, sizePrefix)
 	}
 
@@ -956,8 +960,8 @@ func main() {
 	case "sum":
 		fallthrough
 	case "summary":
-		fmt.Println("Name:", m.path())
-		fmt.Println("  Num     :", m.num())
+		fmt.Println("Name:", m.Path())
+		fmt.Println("  Num     :", m.Num())
 		fmt.Println("  Size    :", m.Size())
 		fmt.Println("  Mod Time:", m.LatestModTime())
 		mchks := 0
@@ -967,7 +971,8 @@ func main() {
 			}
 		}
 		for _, csum := range calcChecksumKinds {
-			m.Checksum(csum) // Cache dir. checksum...
+			// Cache dir. checksum so it doesn't stop in the middle of the line
+			m.Checksum(csum)
 			fmt.Printf("    %-*s: %s\n", 4+mchks, "Chk-"+csum,
 				b2s(m.Checksum(csum)))
 		}
