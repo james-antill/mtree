@@ -18,6 +18,9 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
+
+	"github.com/karrick/godirwalk"
 
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/crypto/ssh/terminal"
@@ -35,13 +38,14 @@ func (chk Checksum) String() string {
 
 // A MTnode is the part fo the merkle tree for a file.
 type MTnode struct {
-	name     string
-	parent   *MTnode
-	csums    []Checksum
-	mode     os.FileMode
-	size     int64
-	children []*MTnode
-	err      error
+	name       string
+	parent     *MTnode
+	csums      []Checksum
+	mode       os.FileMode
+	size       int64
+	mtimeNsecs int64
+	children   []*MTnode
+	err        error
 }
 
 // Name of the node
@@ -120,6 +124,7 @@ func checksumSymlink(r *MTnode, kind string) {
 		fmt.Fprintln(os.Stderr, err)
 		data = ""
 	}
+	r.size = int64(len(data))
 
 	r.csums = nil
 	for _, csum := range csums {
@@ -152,10 +157,12 @@ func checksumFile(r *MTnode, kind string) {
 
 	iow := io.MultiWriter(chksio...)
 
-	if _, err := io.Copy(iow, ior); err != nil {
+	written, err := io.Copy(iow, ior)
+	if err != nil {
 		r.err = err
 		return
 	}
+	r.size = written
 
 	r.csums = nil
 	for i, csum := range csums {
@@ -217,6 +224,21 @@ func (r *MTnode) Size() int64 {
 	return num
 }
 
+func (r *MTnode) latestModNSecs() int64 {
+	mtime := r.mtimeNsecs
+	for _, child := range r.children {
+		if lmtime := child.latestModNSecs(); lmtime > mtime {
+			mtime = lmtime
+		}
+	}
+	return mtime
+}
+
+// LatestModTime gives the newest mtime of the directory and all children.
+func (r *MTnode) LatestModTime() time.Time {
+	return time.Unix(0, r.latestModNSecs())
+}
+
 // Depth gives the number of children in the directory and all children
 func (r *MTnode) Depth() int {
 	if r.parent == nil {
@@ -259,8 +281,8 @@ func (r *MTnode) path() string {
 	return r.parent.dpath() + r.name
 }
 
-func newRes(dres *MTnode, p string) *MTnode {
-	res := &MTnode{name: path.Base(p), parent: dres}
+func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
+	res := &MTnode{name: base, parent: dres, mode: mode}
 	if dres != nil && res.name == "/" {
 		panic(res)
 	}
@@ -281,8 +303,7 @@ func ensureDir(m map[string]*MTnode, p string) *MTnode {
 	}
 
 	dres := getDirRes(m, p)
-	res := newRes(dres, p)
-	res.mode = os.ModeDir
+	res := newRes(dres, path.Base(p), os.ModeDir)
 	m[res.path()] = res
 	return res
 }
@@ -304,7 +325,8 @@ func getDirRes(m map[string]*MTnode, p string) *MTnode {
 // node of each file to the node channel.  It sends the result of the
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
-func walkFiles(done <-chan struct{}, wroot string, qlen int) (<-chan *MTnode, <-chan error) {
+func walkFiles(done <-chan struct{}, wroot string, qlen int,
+	needCachingData bool) (<-chan *MTnode, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
 	errc := make(chan error, 1)
@@ -323,37 +345,42 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int) (<-chan *MTnode, <-
 			return
 		}
 
-		// No select needed for this send, since errc is buffered.
-		errc <- filepath.Walk(wroot, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
+		errc <- godirwalk.Walk(wroot, &godirwalk.Options{
+			Unsorted: true, // faster, yet non-deterministic enumeration
+			Callback: func(path string, de *godirwalk.Dirent) error {
+				//		errc <- filepath.Walk(wroot, func(path string, info os.FileInfo, err error) error {
+				//				if err != nil {
+				//					return nil // Ignore errors or fail on perm. denied?
+				//				}
 
-			symlink := false
-			if (info.Mode() & os.ModeSymlink) != 0 {
-				symlink = true
-			} else if info.Mode().IsDir() {
-				ensureDir(root, path)
+				//				mode := info.Mode()
+				mode := de
+				if mode.IsSymlink() { // Due to windows symlink+dir
+				} else if mode.IsDir() {
+					ensureDir(root, path)
+					return nil
+				} else if !mode.IsRegular() {
+					return nil
+				}
+
+				dp := getDirRes(root, path)
+				// de.Name() == path.Base(path)
+				res := newRes(dp, de.Name(), mode.ModeType())
+
+				if needCachingData {
+					if fi, err := os.Lstat(path); err == nil {
+						res.mtimeNsecs = fi.ModTime().UnixNano()
+					}
+					// FIXME: If it's wanted, fill in uid/etc.
+				}
+
+				select {
+				case nodes <- res:
+				case <-done:
+					return errors.New("walk canceled")
+				}
 				return nil
-			} else if !info.Mode().IsRegular() {
-				return nil
-			}
-
-			dp := getDirRes(root, path)
-			res := newRes(dp, path)
-			res.size = info.Size()
-
-			if symlink {
-				checksumSymlink(res, "")
-				return nil
-			}
-
-			select {
-			case nodes <- res:
-			case <-done:
-				return errors.New("walk canceled")
-			}
-			return nil
+			},
 		})
 		nodes <- root["/"]
 	}()
@@ -462,7 +489,7 @@ func first(r *MTnode) *MTnode {
 var numCPUWorkers = 0
 
 // Mtree Generate for root path
-func Mtree(root string) (*MTnode, error) {
+func Mtree(root string, needCachingData bool) (*MTnode, error) {
 	done := make(chan struct{})
 	defer close(done)
 
@@ -474,7 +501,7 @@ func Mtree(root string) (*MTnode, error) {
 		numDigesters = 1
 	}
 
-	nodes, errc := walkFiles(done, root, numDigesters)
+	nodes, errc := walkFiles(done, root, numDigesters, needCachingData)
 
 	c := make(chan *MTnode)
 
@@ -649,7 +676,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	m, err := Mtree(flag.Arg(1))
+	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
+	m, err := Mtree(flag.Arg(1), !flagFast)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -691,11 +719,18 @@ func main() {
 		fallthrough
 	case "summary":
 		fmt.Println("Name:", m.path())
-		fmt.Println("   Num:", m.num())
-		fmt.Println("  Size:", m.Size())
+		fmt.Println("  Num     :", m.num())
+		fmt.Println("  Size    :", m.Size())
+		fmt.Println("  Mod Time:", m.LatestModTime())
+		mchks := 0
 		for _, csum := range calcChecksumKinds {
-			fmt.Println("    Chk-Kind:", csum)
-			fmt.Println("    Chk-Data:", b2s(m.Checksum(csum)))
+			if len(csum) > mchks {
+				mchks = len(csum)
+			}
+		}
+		for _, csum := range calcChecksumKinds {
+			fmt.Printf("    %-*s: %s\n", 4+mchks, "Chk-"+csum,
+				b2s(m.Checksum(csum)))
 		}
 
 	default:
