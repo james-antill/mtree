@@ -483,6 +483,9 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				// de.Name() == path.Base(p)
 
 				if filter && filterName(name) {
+					if mode.IsDir() {
+						return filepath.SkipDir
+					}
 					return nil
 				}
 
