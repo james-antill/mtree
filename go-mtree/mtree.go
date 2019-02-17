@@ -22,6 +22,9 @@ import (
 
 	"github.com/karrick/godirwalk"
 
+	"github.com/james-antill/mpb"
+	"github.com/james-antill/mpb/decor"
+
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -326,7 +329,7 @@ func getDirRes(m map[string]*MTnode, p string) *MTnode {
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
 func walkFiles(done <-chan struct{}, wroot string, qlen int,
-	needCachingData bool) (<-chan *MTnode, <-chan error) {
+	needCachingData bool, progress bool) (<-chan *MTnode, int64, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
 	errc := make(chan error, 1)
@@ -385,7 +388,23 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 		nodes <- root["/"]
 	}()
 
-	return nodes, errc
+	if progress {
+		nnodes := make(chan *MTnode, qlen)
+		lennodes := make(chan int64)
+		go func() {
+			h := []*MTnode{}
+			for n := range nodes {
+				h = append(h, n)
+			}
+			lennodes <- int64(len(h))
+			for _, n := range h {
+				nnodes <- n
+			}
+			close(nnodes)
+		}()
+		return nnodes, <-lennodes, errc
+	}
+	return nodes, 0, errc
 }
 
 // ShakeSum256_64 is a 64 byte output version of ShakeSum256
@@ -443,13 +462,18 @@ func chkNew(csum string) hash.Hash {
 }
 
 // digester gets nodes for files/symlinks and creates the checksum data for them.
-func digester(done <-chan struct{}, paths <-chan *MTnode, c chan<- *MTnode) {
+func digester(done <-chan struct{}, paths <-chan *MTnode, c chan<- *MTnode,
+	dbar *mpb.Bar) {
 	for res := range paths {
+
 		if res == nil {
 			panic("res is nil")
 		}
 
 		if res.name == "/" {
+			if dbar != nil {
+				dbar.Increment()
+			}
 			// Should be the last one...
 			select {
 			case c <- res:
@@ -462,6 +486,10 @@ func digester(done <-chan struct{}, paths <-chan *MTnode, c chan<- *MTnode) {
 			checksumFile(res, "")
 		} else if res.IsSymlink() {
 			checksumSymlink(res, "")
+		}
+
+		if dbar != nil {
+			dbar.Increment()
 		}
 
 		select {
@@ -489,7 +517,7 @@ func first(r *MTnode) *MTnode {
 var numCPUWorkers = 0
 
 // Mtree Generate for root path
-func Mtree(root string, needCachingData bool) (*MTnode, error) {
+func Mtree(root string, needCachingData bool, progress bool) (*MTnode, error) {
 	done := make(chan struct{})
 	defer close(done)
 
@@ -501,21 +529,31 @@ func Mtree(root string, needCachingData bool) (*MTnode, error) {
 		numDigesters = 1
 	}
 
-	nodes, errc := walkFiles(done, root, numDigesters, needCachingData)
+	nodes, nnodes, errc := walkFiles(done, root, numDigesters,
+		needCachingData, progress)
 
 	c := make(chan *MTnode)
 
 	var wg sync.WaitGroup
 
+	var p *mpb.Progress
+	var dbar *mpb.Bar
+	if progress {
+		p = mpb.New(mpb.WithWaitGroup(&wg))
+		dbar = p.AddBarDef(nnodes, "Digest: ", decor.Unit_k)
+	}
 	wg.Add(numDigesters)
 	for i := 0; i < numDigesters; i++ {
 		go func() {
-			digester(done, nodes, c)
+			digester(done, nodes, c, dbar)
 			wg.Done()
 		}()
 	}
 	go func() {
 		wg.Wait()
+		if p != nil {
+			p.Stop()
+		}
 		close(c)
 	}()
 
@@ -641,11 +679,16 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 func main() {
 	var flagPChecksum string
 	var flagFast bool
+	var flagProgress bool
 	var flagUI bool
 	var flagNUI bool
 	flag.BoolVar(&flagUI, "ui", false, "Use UI output")
 	flag.BoolVar(&flagNUI, "no-ui", false, "Use UI output")
 	flag.BoolVar(&flagFast, "fast", false, "Only calc. primary checksum")
+	progDef := false
+	progUsage := "show progress bar"
+	flag.BoolVar(&flagProgress, "progress", progDef, progUsage)
+	flag.BoolVar(&flagProgress, "p", progDef, progUsage+" (shorthand)")
 	flag.IntVar(&primaryChecksumUILen, "ui-checksum-length",
 		primaryChecksumUILen, "length of UI display checksum")
 	flag.StringVar(&flagPChecksum, "checksums", primaryChecksum, "what checksums to display/use")
@@ -677,7 +720,7 @@ func main() {
 	}
 
 	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
-	m, err := Mtree(flag.Arg(1), !flagFast)
+	m, err := Mtree(flag.Arg(1), !flagFast, flagProgress)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -727,6 +770,7 @@ func main() {
 			if len(csum) > mchks {
 				mchks = len(csum)
 			}
+			m.Checksum(csum)
 		}
 		for _, csum := range calcChecksumKinds {
 			fmt.Printf("    %-*s: %s\n", 4+mchks, "Chk-"+csum,
