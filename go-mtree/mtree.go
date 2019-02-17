@@ -344,6 +344,14 @@ func filterName(name string) bool {
 	return false
 }
 
+// FileMode is a wrapper around os.FileMode that implements .IsSymlink()
+type FileMode struct{ os.FileMode }
+
+// IsSymlink reports whether m describes a directory. That is, it tests for the ModeSymlink bit being set in m.
+func (m FileMode) IsSymlink() bool {
+	return (m.FileMode & os.ModeSymlink) != 0
+}
+
 // walkFiles starts a goroutine to walk the directory tree at root and send the
 // node of each file to the node channel.  It sends the result of the
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
@@ -361,6 +369,17 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 		var err error
 		if wroot, err = filepath.Abs(wroot); err != nil {
 			panic(err)
+		}
+
+		if fi, err := os.Lstat(wroot); err == nil {
+			hfi := FileMode{fi.Mode()}
+			if hfi.IsSymlink() {
+				nr, err := filepath.EvalSymlinks(wroot)
+				if err != nil {
+					errc <- err
+				}
+				wroot = nr
+			}
 		}
 
 		if _, err := os.Stat(wroot); err != nil {
