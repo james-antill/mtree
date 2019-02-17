@@ -215,7 +215,9 @@ func (r *MTnode) Checksum(kind string) []byte {
 
 	c := data2csum(kind, []byte(dd))
 	r.csums = append(r.csums, Checksum{kind, c})
-	return c
+	// Recurse so we know it's cached...
+	// return c
+	return r.Checksum(kind)
 }
 
 // Size gives the size of the directory and all children, not overflow safe.
@@ -770,9 +772,9 @@ func main() {
 			if len(csum) > mchks {
 				mchks = len(csum)
 			}
-			m.Checksum(csum)
 		}
 		for _, csum := range calcChecksumKinds {
+			m.Checksum(csum) // Cache dir. checksum...
 			fmt.Printf("    %-*s: %s\n", 4+mchks, "Chk-"+csum,
 				b2s(m.Checksum(csum)))
 		}
