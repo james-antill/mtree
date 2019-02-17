@@ -326,12 +326,34 @@ func getDirRes(m map[string]*MTnode, p string) *MTnode {
 	return ensureDir(m, dp)
 }
 
+// FIXME: Needs to config. this...
+func filterName(name string) bool {
+	if strings.HasSuffix(name, "~") {
+		return true
+	}
+	if strings.HasSuffix(name, ".bak") {
+		return true
+	}
+	if strings.HasSuffix(name, ".swp") {
+		return true
+	}
+
+	if name == ".git" {
+		return true
+	}
+	if name == ".mtree" {
+		return true
+	}
+
+	return false
+}
+
 // walkFiles starts a goroutine to walk the directory tree at root and send the
 // node of each file to the node channel.  It sends the result of the
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
 func walkFiles(done <-chan struct{}, wroot string, qlen int,
-	needCachingData bool, progress bool) (<-chan *MTnode, int64, <-chan error) {
+	needCachingData, filter, progress bool) (<-chan *MTnode, int64, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
 	errc := make(chan error, 1)
@@ -359,7 +381,15 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				//				}
 
 				//				mode := info.Mode()
+				//				name := path.Base(path)
 				mode := de
+				name := de.Name()
+
+				// Filter things...
+				if filter && filterName(name) {
+					return nil
+				}
+
 				if mode.IsSymlink() { // Due to windows symlink+dir
 				} else if mode.IsDir() {
 					ensureDir(root, path)
@@ -519,7 +549,7 @@ func first(r *MTnode) *MTnode {
 var numCPUWorkers = 0
 
 // Mtree Generate for root path
-func Mtree(root string, needCachingData bool, progress bool) (*MTnode, error) {
+func Mtree(root string, needCachingData, filter, progress bool) (*MTnode, error) {
 	done := make(chan struct{})
 	defer close(done)
 
@@ -532,7 +562,7 @@ func Mtree(root string, needCachingData bool, progress bool) (*MTnode, error) {
 	}
 
 	nodes, nnodes, errc := walkFiles(done, root, numDigesters,
-		needCachingData, progress)
+		needCachingData, filter, progress)
 
 	c := make(chan *MTnode)
 
@@ -682,6 +712,7 @@ func main() {
 	var flagPChecksum string
 	var flagFast bool
 	var flagProgress bool
+	var flagFilter bool
 	var flagUI bool
 	var flagNUI bool
 	flag.BoolVar(&flagUI, "ui", false, "Use UI output")
@@ -691,6 +722,7 @@ func main() {
 	progUsage := "show progress bar"
 	flag.BoolVar(&flagProgress, "progress", progDef, progUsage)
 	flag.BoolVar(&flagProgress, "p", progDef, progUsage+" (shorthand)")
+	flag.BoolVar(&flagFilter, "filter", true, "filter useless entries")
 	flag.IntVar(&primaryChecksumUILen, "ui-checksum-length",
 		primaryChecksumUILen, "length of UI display checksum")
 	flag.StringVar(&flagPChecksum, "checksums", primaryChecksum, "what checksums to display/use")
@@ -722,7 +754,7 @@ func main() {
 	}
 
 	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
-	m, err := Mtree(flag.Arg(1), !flagFast, flagProgress)
+	m, err := Mtree(flag.Arg(1), !flagFast, flagFilter, flagProgress)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
