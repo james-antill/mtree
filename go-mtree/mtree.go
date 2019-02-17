@@ -932,7 +932,24 @@ func main() {
 	}
 
 	if flagFast {
-		calcChecksumKinds = calcChecksumKinds[:1]
+		switch flag.Arg(0) {
+		case "directory-ls":
+			fallthrough
+		case "directory-list":
+			fallthrough
+		case "dir-ls":
+			fallthrough
+		case "dir-list":
+			fallthrough
+		case "ls":
+			fallthrough
+		case "list":
+		case "directory-tree":
+		case "dir-tree":
+		case "tree":
+			calcChecksumKinds = calcChecksumKinds[:1]
+		default:
+		}
 	}
 
 	if len(flag.Args()) != 2 {
