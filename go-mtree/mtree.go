@@ -49,6 +49,8 @@ type MTnode struct {
 	mtimeNsecs int64
 	children   []*MTnode
 	err        error
+
+	sorted bool
 }
 
 // Name of the node
@@ -85,13 +87,22 @@ func fcmpLess(a, b string) bool {
 	return false
 }
 
+// Children gives you the sorted children of this node.
+func (r *MTnode) Children() []*MTnode {
+	if !r.sorted {
+		sort.Slice(r.children, func(i, j int) bool {
+			return fcmpLess(r.children[i].name, r.children[j].name)
+		})
+		r.sorted = true
+	}
+
+	return r.children
+}
+
 // add a child to a parent
 func (r *MTnode) add(c *MTnode) {
 	r.children = append(r.children, c)
-	sort.Slice(r.children, func(i, j int) bool {
-
-		return fcmpLess(r.children[i].name, r.children[j].name)
-	})
+	r.sorted = false
 	r.csums = nil
 }
 
@@ -206,7 +217,7 @@ func (r *MTnode) Checksum(kind string) []byte {
 
 	// For large sets this can be slow, so parallel ftw.
 	var wg sync.WaitGroup
-	for _, child := range r.children {
+	for _, child := range r.Children() {
 		if !child.IsDir() {
 			continue
 		}
@@ -219,7 +230,7 @@ func (r *MTnode) Checksum(kind string) []byte {
 	wg.Wait()
 
 	var dd bytes.Buffer
-	for _, child := range r.children {
+	for _, child := range r.Children() {
 		dd.WriteString(child.name)
 		dd.WriteByte(' ')
 		chk := child.Checksum(kind)
@@ -321,29 +332,70 @@ func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
 	return res
 }
 
-func ensureDir(m map[string]*MTnode, p string) *MTnode {
-
-	if res, ok := m[p]; ok {
-		return res
-	}
-
-	dres := getDirRes(m, p)
-	res := newRes(dres, path.Base(p), os.ModeDir)
-	m[res.Path()] = res
-	return res
+func rootRes() *MTnode {
+	return newRes(nil, "/", os.ModeDir)
 }
 
-func getDirRes(m map[string]*MTnode, p string) *MTnode {
-	if p == "." {
-		p, _ = os.Getwd()
-	}
-	if p == "/" {
+func lookupDirRes(d *MTnode, n string) *MTnode {
+	if !d.sorted || len(d.children) <= 10 { // Brute force for small entries
+		for _, c := range d.children {
+			if c.name != n {
+				continue
+			}
+			return c
+		}
 		return nil
 	}
 
-	//	fmt.Println("path:", p)
-	dp := path.Dir(p)
-	return ensureDir(m, dp)
+	// Now be clever...
+	ents := d.Children()
+	i := sort.Search(len(ents), func(i int) bool {
+		return fcmpLess(n, ents[i].name)
+	})
+	if i < len(ents) && ents[i].name == n {
+		return ents[i]
+	}
+	return nil
+}
+
+func lookupRes(root *MTnode, p []string) *MTnode {
+	d := root
+	for _, n := range p {
+		if d = lookupDirRes(d, n); d != nil {
+			continue
+		}
+		return nil
+	}
+
+	return d
+}
+
+func ensureDirEnts(root *MTnode, pents []string) *MTnode {
+	if res := lookupRes(root, pents); res != nil {
+		return res
+	}
+	ppents := pents[:len(pents)-1]
+	pres := ensureDirEnts(root, ppents)
+	res := newRes(pres, pents[len(pents)-1], os.ModeDir)
+	return res
+}
+
+func ensureDir(root *MTnode, p string) *MTnode {
+	pents := strings.Split(p, "/")
+	return ensureDirEnts(root, pents)
+}
+func ensureParentDir(root *MTnode,
+	p, pparent string, ppent *MTnode) (*MTnode, string) {
+	d := path.Dir(p)
+	if d == pparent {
+		return ppent, pparent
+	}
+	if false && ppent != nil { // Slower on 2,000 / 100
+		ppent.Children()
+	}
+	pents := strings.Split(p, "/")
+	ppents := pents[:len(pents)-1]
+	return ensureDirEnts(root, ppents), d
 }
 
 // FIXME: Needs to config. this...
@@ -389,7 +441,6 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 		// Close the channel after Walk returns.
 		defer close(nodes)
 
-		root := make(map[string]*MTnode)
 		var err error
 		if wroot, err = filepath.Abs(wroot); err != nil {
 			panic(err)
@@ -412,9 +463,14 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 			return
 		}
 
+		root := rootRes()
+
+		//		fmt.Println("JDBG: BEG:", time.Now())
+		pparent := ""
+		ppent := root
 		errc <- godirwalk.Walk(wroot, &godirwalk.Options{
 			Unsorted: true, // faster, yet non-deterministic enumeration
-			Callback: func(path string, de *godirwalk.Dirent) error {
+			Callback: func(p string, de *godirwalk.Dirent) error {
 				//		errc <- filepath.Walk(wroot, func(path string, info os.FileInfo, err error) error {
 				//				if err != nil {
 				//					return nil // Ignore errors or fail on perm. denied?
@@ -424,26 +480,26 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				//				name := path.Base(path)
 				mode := de
 				name := de.Name()
+				// de.Name() == path.Base(p)
 
-				// Filter things...
 				if filter && filterName(name) {
 					return nil
 				}
 
 				if mode.IsSymlink() { // Due to windows symlink+dir
-				} else if mode.IsDir() {
-					ensureDir(root, path)
+				} else if mode.IsDir() { // Because of empty dirs.
+					// ppent, pparent = ensureParentDir(root, p+"/.", pparent, ppent)
+					ensureDir(root, p)
 					return nil
 				} else if !mode.IsRegular() {
 					return nil
 				}
 
-				dp := getDirRes(root, path)
-				// de.Name() == path.Base(path)
-				res := newRes(dp, de.Name(), mode.ModeType())
+				ppent, pparent = ensureParentDir(root, p, pparent, ppent)
+				res := newRes(ppent, name, mode.ModeType())
 
 				if needCachingData {
-					if fi, err := os.Lstat(path); err == nil {
+					if fi, err := os.Lstat(p); err == nil {
 						res.mtimeNsecs = fi.ModTime().UnixNano()
 					}
 					// FIXME: If it's wanted, fill in uid/etc.
@@ -457,12 +513,15 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				return nil
 			},
 		})
-		nodes <- root["/"]
+		nodes <- root
+		//		fmt.Println("JDBG: END:", time.Now())
 	}()
 
+	// NOTE: This is sometimes faster and sometimes slower??
 	if progress {
 		nnodes := make(chan *MTnode, qlen)
 		lennodes := make(chan int64)
+
 		go func() {
 			h := []*MTnode{}
 			for n := range nodes {
@@ -474,6 +533,7 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 			}
 			close(nnodes)
 		}()
+
 		return nnodes, <-lennodes, errc
 	}
 	return nodes, 0, errc
@@ -862,7 +922,7 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 		return
 	}
 
-	for _, c := range r.children {
+	for _, c := range r.Children() {
 		prntListMtreed(c, tree, ui, sizePrefix)
 	}
 }
