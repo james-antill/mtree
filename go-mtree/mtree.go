@@ -95,12 +95,8 @@ func (r *MTnode) add(c *MTnode) {
 	r.csums = nil
 }
 
-// No "shake-256-64" because it requires work to make it act like a normal hash
-var validChecksumKinds = [...]string{"md5", "sha1", "sha256", "sha3-256", "sha3-512"}
-
 // var calcChecksumKinds = validChecksumKinds[:]
-var calcChecksumKinds = []string{"md5", "sha1", "sha256", "sha3-256"}
-var primaryChecksum = "md5"
+var calcChecksumKinds = []string{"md5", "sha1", "sha256"}
 var primaryChecksumUILen = 16
 
 func validChecksum(kind string) bool {
@@ -439,12 +435,91 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 	return nodes, 0, errc
 }
 
+// ShakeHash convert to normal golang hases...
+type shake2hash32 struct {
+	shake sha3.ShakeHash
+}
+type shake2hash64 struct {
+	shake sha3.ShakeHash
+}
+
+// Pass through fuctions...
+func (s *shake2hash32) Write(p []byte) (n int, err error) {
+	return s.shake.Write(p)
+}
+func (s *shake2hash32) Read(p []byte) (n int, err error) {
+	return s.shake.Read(p)
+}
+func (s *shake2hash32) Reset() {
+	s.shake.Reset()
+}
+func (s *shake2hash32) BlockSize() int {
+	return 4096
+}
+func (s *shake2hash64) Write(p []byte) (n int, err error) {
+	return s.shake.Write(p)
+}
+func (s *shake2hash64) Read(p []byte) (n int, err error) {
+	return s.shake.Read(p)
+}
+func (s *shake2hash64) Reset() {
+	s.shake.Reset()
+}
+func (s *shake2hash64) BlockSize() int {
+	return 4096
+}
+
+// Different 32/64 functions...
+func (s *shake2hash32) Clone() sha3.ShakeHash {
+	return &shake2hash32{s.shake.Clone()}
+}
+func (s *shake2hash32) Size() int {
+	return 32
+}
+func (s *shake2hash32) Sum(b []byte) []byte {
+	ns := s.shake.Clone()
+
+	var ret [32]byte
+	ns.Write(b)
+	ns.Read(ret[:])
+	return ret[:]
+}
+
+func (s *shake2hash64) Clone() sha3.ShakeHash {
+	return &shake2hash64{s.shake.Clone()}
+}
+func (s *shake2hash64) Size() int {
+	return 64
+}
+func (s *shake2hash64) Sum(b []byte) []byte {
+	ns := s.shake.Clone()
+
+	var ret [64]byte
+	ns.Write(b)
+	ns.Read(ret[:])
+	return ret[:]
+}
+
+// No Sum32/Sum64 ?
+
+// ShakeSum128_32 is a 32 byte output version of ShakeSum128
+func ShakeSum128_32(data []byte) [32]byte {
+	var ret [32]byte
+	sha3.ShakeSum256(ret[:], data)
+	return ret
+}
+
 // ShakeSum256_64 is a 64 byte output version of ShakeSum256
 func ShakeSum256_64(data []byte) [64]byte {
 	var ret [64]byte
 	sha3.ShakeSum256(ret[:], data)
 	return ret
 }
+
+var validChecksumKinds = [...]string{"md5", "sha1",
+	"sha224", "sha256", "sha384", "sha512", "sha512-224", "sha512-256",
+	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
+	"shake-128-32", "shake-256-64"}
 
 func data2csum(csum string, data []byte) []byte {
 	switch csum {
@@ -454,21 +529,43 @@ func data2csum(csum string, data []byte) []byte {
 	case "sha1":
 		val := sha1.Sum(data)
 		return val[:]
+
 	case "sha256":
 		val := sha256.Sum256(data)
+		return val[:]
+	case "sha384":
+		val := sha512.Sum384(data)
 		return val[:]
 	case "sha512":
 		val := sha512.Sum512(data)
 		return val[:]
+	case "sha512-224":
+		val := sha512.Sum512_224(data)
+		return val[:]
+	case "sha512-256":
+		val := sha512.Sum512_256(data)
+		return val[:]
+
+	case "sha3-224":
+		val := sha3.Sum224(data)
+		return val[:]
 	case "sha3-256":
 		val := sha3.Sum256(data)
+		return val[:]
+	case "sha3-384":
+		val := sha3.Sum384(data)
 		return val[:]
 	case "sha3-512":
 		val := sha3.Sum512(data)
 		return val[:]
-		//	case "shake-256-64":
-		//		val := ShakeSum256_64(data)
-		//		return val[:]
+
+	case "shake-128-32":
+		val := ShakeSum128_32(data)
+		return val[:]
+	case "shake-256-64":
+		val := ShakeSum256_64(data)
+		return val[:]
+
 	default:
 		panic("Bad csum" + csum)
 	}
@@ -480,14 +577,31 @@ func chkNew(csum string) hash.Hash {
 		return md5.New()
 	case "sha1":
 		return sha1.New()
+
 	case "sha256":
 		return sha256.New()
+	case "sha384":
+		return sha512.New384()
 	case "sha512":
 		return sha512.New()
+	case "sha512-224":
+		return sha512.New512_224()
+	case "sha512-256":
+		return sha512.New512_256()
+
+	case "sha3-224":
+		return sha3.New224()
 	case "sha3-256":
 		return sha3.New256()
+	case "sha3-384":
+		return sha3.New384()
+	case "sha3-512":
+		return sha3.New512()
 
-		// FIXME: missing shake
+	case "shake-128-32":
+		return &shake2hash32{sha3.NewShake128()}
+	case "shake-256-64":
+		return &shake2hash64{sha3.NewShake256()}
 	default:
 		panic("Bad csum" + csum)
 	}
@@ -670,7 +784,7 @@ func b2s(b []byte) string {
 }
 
 func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
-
+	primaryChecksum := calcChecksumKinds[0]
 	chksum := b2s(r.Checksum(primaryChecksum))
 	if ui && primaryChecksumUILen > 0 {
 		chksum = chksum[:primaryChecksumUILen]
@@ -725,7 +839,8 @@ func main() {
 	flag.BoolVar(&flagFilter, "filter", true, "filter useless entries")
 	flag.IntVar(&primaryChecksumUILen, "ui-checksum-length",
 		primaryChecksumUILen, "length of UI display checksum")
-	flag.StringVar(&flagPChecksum, "checksums", primaryChecksum, "what checksums to display/use")
+	pchkDef := "md5,sha1,sha256,shake-256-64"
+	flag.StringVar(&flagPChecksum, "checksums", pchkDef, "what checksums to display/use")
 	flag.IntVar(&numCPUWorkers, "workers",
 		primaryChecksumUILen, "manually set number of checksum workers")
 	flag.Parse()
@@ -740,12 +855,39 @@ func main() {
 		}
 	}
 
-	if validChecksum(flagPChecksum) {
-		primaryChecksum = flagPChecksum
+	if flagPChecksum != "" {
+		f := func(c rune) bool {
+			switch c {
+			case ';':
+				return true
+			case ',':
+				return true
+			case '.':
+				return true
+			case ':':
+				return true
+			case '!':
+				return true
+			case '/':
+				return true
+			case ' ':
+				return true
+			case '\t':
+				return true
+			default:
+				return false
+			}
+		}
+		calcChecksumKinds = []string{}
+		for _, csum := range strings.FieldsFunc(flagPChecksum, f) {
+			if validChecksum(csum) {
+				calcChecksumKinds = append(calcChecksumKinds, csum)
+			}
+		}
 	}
 
 	if flagFast {
-		calcChecksumKinds = []string{primaryChecksum}
+		calcChecksumKinds = calcChecksumKinds[:1]
 	}
 
 	if len(flag.Args()) != 2 {
