@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
 
 func TestFormat(t *testing.T) {
 	data := []struct {
@@ -62,6 +65,60 @@ func TestFormat(t *testing.T) {
 		}
 	}
 
+}
+
+func TestPath(t *testing.T) {
+	root := rootRes()
+	d1 := newRes(root, "d1", os.ModeDir)
+	d2 := newRes(root, "d2", os.ModeDir)
+	d2n1 := newRes(d2, "n1", 0755)
+	d3 := newRes(root, "d3", os.ModeDir)
+	d3n1 := newRes(d3, "n1", 0755)
+	d3n2 := newRes(d3, "n2", 0755)
+	d4 := newRes(root, "d4", os.ModeDir)
+	d4n1 := newRes(d4, "n1", 0755)
+	d4n2 := newRes(d4, "n2", 0755)
+	d4n3 := newRes(d4, "n3", 0755)
+	d4n4 := newRes(d4, "n4", os.ModeDir)
+	d4n4x1 := newRes(d4n4, "x1", 0755)
+
+	d8 := ensureDir(root, "/a/b/c/d")
+	dn4 := ensureDir(root, "/d4/n4")
+
+	data := []struct {
+		val string
+		res string
+	}{
+		{d1.Path(), "/d1"},
+		{d2.Path(), "/d2"},
+		{d3.Path(), "/d3"},
+		{d4.Path(), "/d4"},
+
+		{d2n1.Path(), "/d2/n1"},
+
+		{d3n1.Path(), "/d3/n1"},
+		{d3n2.Path(), "/d3/n2"},
+
+		{d4n1.Path(), "/d4/n1"},
+		{d4n2.Path(), "/d4/n2"},
+		{d4n3.Path(), "/d4/n3"},
+		{d4n4.Path(), "/d4/n4"},
+
+		{d4n4x1.Path(), "/d4/n4/x1"},
+
+		{d8.Path(), "/a/b/c/d"},
+		{dn4.Path(), "/d4/n4"},
+	}
+
+	for i := range data {
+		val := data[i].val
+		res := data[i].res
+
+		if val != res {
+			t.Errorf("data not equl:\n tst=<%s>\n got <%s>\n",
+				res, val)
+		}
+	}
 }
 
 func TestHashes(t *testing.T) {

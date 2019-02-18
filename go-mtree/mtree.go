@@ -281,6 +281,15 @@ func (r *MTnode) Depth() int {
 	return r.parent.Depth() + 1
 }
 
+// Num gives the number of children in the directory and all children, not overflow safe.
+func (r *MTnode) Num() int {
+	num := len(r.children)
+	for _, child := range r.children {
+		num += child.Num()
+	}
+	return num
+}
+
 func (r *MTnode) dpath() string {
 	if !r.IsDir() {
 		panic(r)
@@ -295,15 +304,6 @@ func (r *MTnode) dpath() string {
 		panic(r)
 	}
 	return r.parent.dpath() + r.name + "/"
-}
-
-// Num gives the number of children in the directory and all children, not overflow safe.
-func (r *MTnode) Num() int {
-	num := len(r.children)
-	for _, child := range r.children {
-		num += child.Num()
-	}
-	return num
 }
 
 // Path gives the full path to the node
@@ -323,6 +323,9 @@ func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
 		panic(res)
 	}
 	if res.name == "." {
+		panic(res)
+	}
+	if res.name == "" {
 		panic(res)
 	}
 	if dres != nil {
@@ -358,42 +361,60 @@ func lookupDirRes(d *MTnode, n string) *MTnode {
 	return nil
 }
 
-func lookupRes(root *MTnode, p []string) *MTnode {
+func lookupRes(root *MTnode, p []string) (*MTnode, int) {
 	d := root
+	num := 0
 	for _, n := range p {
-		if d = lookupDirRes(d, n); d != nil {
-			continue
+		nd := lookupDirRes(d, n)
+		if nd == nil {
+			break
 		}
-		return nil
+		num++
+		d = nd
+	}
+
+	return d, num
+}
+
+func ensureDirEnts(root *MTnode, pents []string) *MTnode {
+	d, num := lookupRes(root, pents)
+	if len(pents) == num {
+		return d
+	}
+
+	for _, name := range pents[num:] {
+		d = newRes(d, name, os.ModeDir)
 	}
 
 	return d
 }
 
-func ensureDirEnts(root *MTnode, pents []string) *MTnode {
-	if res := lookupRes(root, pents); res != nil {
-		return res
+func pathSplit(p string) []string {
+	pents := strings.Split(p, "/")
+	if pents[0] != "" {
+		panic(p)
 	}
-	ppents := pents[:len(pents)-1]
-	pres := ensureDirEnts(root, ppents)
-	res := newRes(pres, pents[len(pents)-1], os.ModeDir)
-	return res
+	return pents[1:]
+}
+func ensureDir(root *MTnode, p string) *MTnode {
+	return ensureDirEnts(root, pathSplit(p))
 }
 
-func ensureDir(root *MTnode, p string) *MTnode {
-	pents := strings.Split(p, "/")
-	return ensureDirEnts(root, pents)
-}
 func ensureParentDir(root *MTnode,
 	p, pparent string, ppent *MTnode) (*MTnode, string) {
 	d := path.Dir(p)
 	if d == pparent {
 		return ppent, pparent
 	}
-	if false && ppent != nil { // Slower on 2,000 / 100
+
+	// Sort the old directory so we can do fast lookups?
+	// walk does depth first though, so it's not great.
+	if false && ppent != nil {
+		// Slower on 2,000 / 100
+		// Slower on 200 / 1,000
 		ppent.Children()
 	}
-	pents := strings.Split(p, "/")
+	pents := pathSplit(p)
 	ppents := pents[:len(pents)-1]
 	return ensureDirEnts(root, ppents), d
 }
@@ -936,9 +957,8 @@ func main() {
 	var flagProgress bool
 	var flagFilter bool
 	var flagUI bool
-	var flagNUI bool
-	flag.BoolVar(&flagUI, "ui", false, "Use UI output")
-	flag.BoolVar(&flagNUI, "no-ui", false, "Use UI output")
+
+	flag.BoolVar(&flagUI, "ui", terminal.IsTerminal(int(os.Stdout.Fd())), "Use UI output")
 	flag.BoolVar(&flagFast, "fast", false, "Only calc. primary checksum")
 	progDef := false
 	progUsage := "show progress bar"
@@ -953,16 +973,6 @@ func main() {
 		primaryChecksumUILen, "manually set number of checksum workers")
 	flag.Parse()
 
-	if flagNUI {
-		flagUI = false
-	} else {
-		if !flagUI {
-			if terminal.IsTerminal(int(os.Stdout.Fd())) {
-				flagUI = true
-			}
-		}
-	}
-
 	if flagPChecksum != "" {
 		f := func(c rune) bool {
 			switch c {
@@ -970,11 +980,7 @@ func main() {
 				return true
 			case ',':
 				return true
-			case '.':
-				return true
 			case ':':
-				return true
-			case '!':
 				return true
 			case '/':
 				return true
