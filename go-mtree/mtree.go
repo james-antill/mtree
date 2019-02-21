@@ -963,12 +963,14 @@ func main() {
 	var flagFilter bool
 	var flagUI bool
 
-	flag.BoolVar(&flagUI, "ui", terminal.IsTerminal(int(os.Stdout.Fd())), "Use UI output")
+	isTermOut := terminal.IsTerminal(int(os.Stdout.Fd()))
+	isTermErr := terminal.IsTerminal(int(os.Stderr.Fd()))
+
+	flag.BoolVar(&flagUI, "ui", isTermOut, "Use UI output")
 	flag.BoolVar(&flagFast, "fast", false, "Only calc. primary checksum")
-	progDef := false
 	progUsage := "show progress bar"
-	flag.BoolVar(&flagProgress, "progress", progDef, progUsage)
-	flag.BoolVar(&flagProgress, "p", progDef, progUsage+" (shorthand)")
+	flag.BoolVar(&flagProgress, "progress", isTermErr, progUsage)
+	flag.BoolVar(&flagProgress, "p", isTermErr, progUsage+" (shorthand)")
 	flag.BoolVar(&flagFilter, "filter", true, "filter useless entries")
 	flag.IntVar(&primaryChecksumUILen, "ui-checksum-length",
 		primaryChecksumUILen, "length of UI display checksum")
