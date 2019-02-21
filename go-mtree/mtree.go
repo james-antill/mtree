@@ -536,6 +536,11 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				}
 				return nil
 			},
+			// We can't do this because
+			//			PostChildrenCallback: func(p string, de *godirwalk.Dirent) error {
+			//				res := ensureDir(root, p)
+			//				res.dirDone()
+			//			},
 		})
 		nodes <- root
 		//		fmt.Println("JDBG: END:", time.Now())
@@ -1021,6 +1026,8 @@ func main() {
 		}
 	}
 
+	cachingData := !flagFast
+
 	if len(flag.Args()) != 2 {
 		flag.PrintDefaults()
 		os.Exit(1)
@@ -1071,7 +1078,9 @@ func main() {
 		fmt.Println("Name:", m.Path())
 		fmt.Println("  Num     :", m.Num())
 		fmt.Println("  Size    :", m.Size())
-		fmt.Println("  Mod Time:", m.LatestModTime())
+		if cachingData {
+			fmt.Println("  Mod Time:", m.LatestModTime())
+		}
 		mchks := 0
 		for _, csum := range calcChecksumKinds {
 			if len(csum) > mchks {
