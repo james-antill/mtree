@@ -957,6 +957,11 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 }
 
 func main() {
+	var flagHelp bool
+	helpUsage := "show help"
+	flag.BoolVar(&flagHelp, "help", false, helpUsage)
+	flag.BoolVar(&flagHelp, "h", false, helpUsage+" (shorthand)")
+
 	var flagPChecksum string
 	var flagFast bool
 	var flagProgress bool
@@ -1028,15 +1033,34 @@ func main() {
 		}
 	}
 
+	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
 	cachingData := !flagFast
 
-	if len(flag.Args()) != 2 {
-		flag.PrintDefaults()
-		os.Exit(1)
+	switch flag.Arg(0) {
+	case "chk":
+		fallthrough
+	case "check":
+		if flagHelp || len(flag.Args()) < 3 {
+			fmt.Fprintln(os.Stderr, "Usage: mtree check <dir> <check> [check...]")
+			flag.PrintDefaults()
+			if flagHelp {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
+
+	default:
+		if flagHelp || len(flag.Args()) != 2 {
+			fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [check...]")
+			flag.PrintDefaults()
+			if flagHelp {
+				os.Exit(0)
+			}
+			os.Exit(1)
+		}
 	}
 
-	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
-	m, err := Mtree(flag.Arg(1), !flagFast, flagFilter, flagProgress)
+	m, err := Mtree(flag.Arg(1), cachingData, flagFilter, flagProgress)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -1096,8 +1120,41 @@ func main() {
 				b2s(m.Checksum(csum)))
 		}
 
+	case "chk":
+		fallthrough
+	case "check":
+		chkArgs := flag.Args()[2:]
+		chkDone := make([]bool, len(chkArgs))
+		for _, csum := range calcChecksumKinds {
+			for i, arg := range chkArgs {
+				if len(arg) < (len(csum) + 2) {
+					continue
+				}
+				if !strings.HasPrefix(arg, csum+":") {
+					continue
+				}
+
+				argCsum := arg[len(csum)+1:]
+				fndCsum := b2s(m.Checksum(csum))
+				if !strings.HasPrefix(fndCsum, argCsum) {
+					fmt.Fprintln(os.Stderr, "Failed checksum:", csum)
+					os.Exit(4)
+				}
+				chkDone[i] = true
+			}
+		}
+
+		for i, chk := range chkDone {
+			if chk {
+				continue
+			}
+
+			fmt.Fprintln(os.Stderr, "No match for checksum:", chkArgs[i])
+			os.Exit(4)
+		}
+
 	default:
-		fmt.Println("Usage: mtree list|summary|tree <dir>")
+		fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [checks...]")
 		os.Exit(1)
 	}
 }
