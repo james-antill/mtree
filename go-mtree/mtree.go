@@ -538,6 +538,7 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 			},
 			ErrorCallback: func(p string, e error) godirwalk.ErrorAction {
 				ensureParentDir(root, p, pparent, ppent)
+				fmt.Fprintln(os.Stderr, e)
 				return godirwalk.SkipNode
 			},
 			// We can't do this because
