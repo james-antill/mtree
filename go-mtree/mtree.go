@@ -960,6 +960,23 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 	}
 }
 
+func usageCmdEqual() {
+	fmt.Fprintln(os.Stderr, "Usage: mtree check <dir> <check> [check...]")
+}
+func fullUsageCmdEqual(exitCode int) {
+	usageCmdEqual()
+	flag.PrintDefaults()
+	os.Exit(exitCode)
+}
+func usageCmdDef() {
+	fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [check...]")
+}
+func fullUsageCmdDef(exitCode int) {
+	usageCmdDef()
+	flag.PrintDefaults()
+	os.Exit(exitCode)
+}
+
 func main() {
 	var flagHelp bool
 	helpUsage := "show help"
@@ -1008,59 +1025,85 @@ func main() {
 				return false
 			}
 		}
+
 		calcChecksumKinds = []string{}
 		for _, csum := range strings.FieldsFunc(flagPChecksum, f) {
 			if validChecksum(csum) {
 				calcChecksumKinds = append(calcChecksumKinds, csum)
 			}
 		}
+		if len(calcChecksumKinds) < 1 {
+			oneOf := strings.Join(validChecksumKinds[:], ", ")
+			fmt.Fprintf(os.Stderr, "Non-valid checksums flag: %s\n"+
+				" Choose from: %s\n", flagPChecksum, oneOf)
+			fullUsageCmdDef(1)
+		}
 	}
 
-	if flagFast {
-		switch flag.Arg(0) {
-		case "directory-ls":
-			fallthrough
-		case "directory-list":
-			fallthrough
-		case "dir-ls":
-			fallthrough
-		case "dir-list":
-			fallthrough
-		case "ls":
-			fallthrough
-		case "list":
-		case "directory-tree":
-		case "dir-tree":
-		case "tree":
-			calcChecksumKinds = calcChecksumKinds[:1]
-		default:
-		}
+	switch flag.Arg(0) {
+	case "directory-ls":
+		fallthrough
+	case "directory-list":
+		fallthrough
+	case "dir-ls":
+		fallthrough
+	case "dir-list":
+		fallthrough
+	case "ls":
+		fallthrough
+	case "list":
+	case "directory-tree":
+	case "dir-tree":
+	case "tree":
+		calcChecksumKinds = calcChecksumKinds[:1]
+
+	default:
 	}
 
 	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
 	cachingData := !flagFast
 
+	usageExitCode := 1
+	if flagHelp {
+		usageExitCode = 0
+	}
 	switch flag.Arg(0) {
+	case "eq":
+		fallthrough
+	case "equal":
+		fallthrough
 	case "chk":
 		fallthrough
 	case "check":
 		if flagHelp || len(flag.Args()) < 3 {
-			fmt.Fprintln(os.Stderr, "Usage: mtree check <dir> <check> [check...]")
-			flag.PrintDefaults()
-			if flagHelp {
-				os.Exit(0)
+			fullUsageCmdEqual(usageExitCode)
+		}
+
+		// Overrides --checksums flag, but it's pointless otherwise.
+		calcChecksumKinds = []string{}
+		for _, arg := range flag.Args()[2:] {
+			i := strings.Index(arg, ":")
+			if i == -1 {
+				fmt.Fprintln(os.Stderr,
+					"Bad format for checksum (Eg. md5:<md5sum>):", arg)
+				usageCmdEqual()
+				os.Exit(1)
 			}
-			os.Exit(1)
+
+			chkKind := arg[:i]
+			if !validChecksum(chkKind) {
+				oneOf := strings.Join(validChecksumKinds[:], ", ")
+				fmt.Fprintf(os.Stderr, "Unknown checksum: %s\n"+
+					" Choose one of: %s\n", chkKind, oneOf)
+				usageCmdEqual()
+				os.Exit(1)
+			}
+			calcChecksumKinds = append(calcChecksumKinds, chkKind)
 		}
 
 	default:
 		if flagHelp || len(flag.Args()) != 2 {
-			fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [check...]")
-			flag.PrintDefaults()
-			if flagHelp {
-				os.Exit(0)
-			}
-			os.Exit(1)
+			fullUsageCmdDef(usageExitCode)
 		}
 	}
 
@@ -1124,11 +1167,16 @@ func main() {
 				b2s(m.Checksum(csum)))
 		}
 
+	case "eq":
+		fallthrough
+	case "equal":
+		fallthrough
 	case "chk":
 		fallthrough
 	case "check":
 		chkArgs := flag.Args()[2:]
 		chkDone := make([]bool, len(chkArgs))
+		failedChecksum := false
 		for _, csum := range calcChecksumKinds {
 			for i, arg := range chkArgs {
 				if len(arg) < (len(csum) + 2) {
@@ -1141,11 +1189,15 @@ func main() {
 				argCsum := arg[len(csum)+1:]
 				fndCsum := b2s(m.Checksum(csum))
 				if !strings.HasPrefix(fndCsum, argCsum) {
-					fmt.Fprintln(os.Stderr, "Failed checksum:", csum)
-					os.Exit(4)
+					fmt.Fprintln(os.Stderr, "Failed checksum:", csum, arg)
+					failedChecksum = true
 				}
 				chkDone[i] = true
 			}
+		}
+
+		if failedChecksum {
+			os.Exit(4)
 		}
 
 		for i, chk := range chkDone {
