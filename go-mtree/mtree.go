@@ -449,6 +449,15 @@ func (m FileMode) IsSymlink() bool {
 	return (m.FileMode & os.ModeSymlink) != 0
 }
 
+// mustAbs calls filepath.Abs() and panics if there is an error
+func mustAbs(path string) string {
+	ret, err := filepath.Abs(path)
+	if err != nil {
+		panic(err)
+	}
+	return ret
+}
+
 // walkFiles starts a goroutine to walk the directory tree at root and send the
 // node of each file to the node channel.  It sends the result of the
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
@@ -462,10 +471,7 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 		// Close the channel after Walk returns.
 		defer close(nodes)
 
-		var err error
-		if wroot, err = filepath.Abs(wroot); err != nil {
-			panic(err)
-		}
+		wroot := mustAbs(wroot)
 
 		if fi, err := os.Lstat(wroot); err == nil {
 			hfi := FileMode{fi.Mode()}
@@ -486,22 +492,17 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 
 		root := rootRes()
 
-		//		fmt.Println("JDBG: BEG:", time.Now())
+		// Timing the walk...
+		fmt.Println("JDBG: BEG:", time.Now())
+		defer func() { fmt.Println("JDBG: END:", time.Now()) }()
+
 		pparent := ""
 		ppent := root
 		errc <- godirwalk.Walk(wroot, &godirwalk.Options{
 			Unsorted: true, // faster, yet non-deterministic enumeration
 			Callback: func(p string, de *godirwalk.Dirent) error {
-				//		errc <- filepath.Walk(wroot, func(path string, info os.FileInfo, err error) error {
-				//				if err != nil {
-				//					return nil // Ignore errors or fail on perm. denied?
-				//				}
-
-				//				mode := info.Mode()
-				//				name := path.Base(path)
 				mode := de
 				name := de.Name()
-				// de.Name() == path.Base(p)
 
 				if filter && filterName(name) {
 					if mode.IsDir() {
@@ -541,14 +542,14 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				fmt.Fprintln(os.Stderr, e)
 				return godirwalk.SkipNode
 			},
-			// We can't do this because
+			//  We can't do this because we don't know when the checksum workers
+			// will be finished with the child nodes.
 			//			PostChildrenCallback: func(p string, de *godirwalk.Dirent) error {
 			//				res := ensureDir(root, p)
 			//				res.dirDone()
 			//			},
 		})
 		nodes <- root
-		//		fmt.Println("JDBG: END:", time.Now())
 	}()
 
 	// NOTE: This is sometimes faster and sometimes slower??
@@ -888,6 +889,28 @@ func fmtSprint(f float64, ext string) string {
 	return fmt.Sprintf("%.1f%s", rf, ext)
 }
 
+func formatFK(f float64) string {
+	ext := " "
+	switch {
+	case f >= TB:
+		f /= TB
+		ext = "T"
+	case f >= GB:
+		f /= GB
+		ext = "G"
+	case f >= MB:
+		f /= MB
+		ext = "M"
+	case f >= KB:
+		f /= KB
+		ext = "K"
+	}
+	return fmtSprint(f, ext)
+}
+func formatK(i int64) string {
+	return formatFK(float64(i))
+}
+
 func formatFKB(f float64) string {
 	ext := "b "
 	switch {
@@ -910,11 +933,18 @@ func formatKB(i int64) string {
 	return formatFKB(float64(i))
 }
 
-func _muin(ui bool, size int64) string {
+func _muinb(ui bool, size int64) string {
 	if !ui {
 		return fmt.Sprintf("%d", size)
 	}
 	return formatKB(size)
+}
+
+func _muin(ui bool, size int64) string {
+	if !ui {
+		return fmt.Sprintf("%d", size)
+	}
+	return formatK(size)
 }
 
 func b2s(b []byte) string {
@@ -943,7 +973,7 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 		fn = fn + "/"
 	}
 
-	fmt.Printf("%s %s%s %s\n", chksum, sizePrefix, _muin(ui, r.Size()), fn)
+	fmt.Printf("%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
 }
 
 func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
@@ -1150,10 +1180,16 @@ func main() {
 		fallthrough
 	case "summary":
 		fmt.Println("Name:", m.Path())
-		fmt.Println("  Num     :", m.Num())
-		fmt.Println("  Size    :", m.Size())
+		// p := message.NewPrinter(message.MatchLanguage("en"))
+		// p.Println("  Num     :", m.Num())
+		fmt.Println("  Num     :", _muin(flagUI, int64(m.Num())))
+		fmt.Println("  Size    :", _muinb(flagUI, m.Size()))
 		if cachingData {
-			fmt.Println("  Mod Time:", m.LatestModTime())
+			timeFmt := time.RFC3339Nano
+			if flagUI { // Similar, but with spaces...
+				timeFmt = "2006-01-02 15:04:05.999999999 Z07:00"
+			}
+			fmt.Println("  Mod Time:", m.LatestModTime().Format(timeFmt))
 		}
 		mchks := 0
 		for _, csum := range calcChecksumKinds {
