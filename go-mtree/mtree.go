@@ -536,6 +536,10 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 				}
 				return nil
 			},
+			ErrorCallback: func(p string, e error) godirwalk.ErrorAction {
+				ensureParentDir(root, p, pparent, ppent)
+				return godirwalk.SkipNode
+			},
 			// We can't do this because
 			//			PostChildrenCallback: func(p string, de *godirwalk.Dirent) error {
 			//				res := ensureDir(root, p)
