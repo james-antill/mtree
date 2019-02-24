@@ -12,6 +12,7 @@ import (
 	"hash"
 	"io"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"runtime"
@@ -27,6 +28,8 @@ import (
 
 	"golang.org/x/crypto/sha3"
 	"golang.org/x/crypto/ssh/terminal"
+
+	"gopkg.in/ini.v1"
 )
 
 // Checksum is a holder for different checksums
@@ -1070,13 +1073,102 @@ func fullUsageCmdEqual(exitCode int) {
 	flag.PrintDefaults()
 	os.Exit(exitCode)
 }
+func usageCmdConfig() {
+	fmt.Fprintln(os.Stderr, "Usage: mtree config [value] [newvalue...]")
+}
+func fullUsageCmdConfig(exitCode int) {
+	usageCmdConfig()
+	flag.PrintDefaults()
+	os.Exit(exitCode)
+}
 func usageCmdDef() {
-	fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [check...]")
+	fmt.Fprintln(os.Stderr, "Usage: mtree config|equal|list|summary|tree <dir> [check...]")
 }
 func fullUsageCmdDef(exitCode int) {
 	usageCmdDef()
 	flag.PrintDefaults()
 	os.Exit(exitCode)
+}
+
+type cmdType int
+
+const (
+	cmdUnknown cmdType = iota
+	cmdList
+	cmdTree
+	cmdInfo
+	cmdSummary
+	cmdEqual
+	cmdConfig
+)
+
+func parseCmd(cmd string) cmdType {
+	switch cmd {
+	case "directory-ls":
+		fallthrough
+	case "directory-list":
+		fallthrough
+	case "dir-ls":
+		fallthrough
+	case "dir-list":
+		fallthrough
+	case "ls":
+		fallthrough
+	case "list":
+		return cmdList
+
+	case "directory-tree":
+		fallthrough
+	case "dir-tree":
+		fallthrough
+	case "tree":
+		return cmdTree
+
+	case "directory-information":
+		fallthrough
+	case "dir-information":
+		fallthrough
+	case "information":
+		fallthrough
+	case "directory-info":
+		fallthrough
+	case "dir-info":
+		fallthrough
+	case "info":
+		return cmdInfo
+
+	case "directory-sum":
+		fallthrough
+	case "dir-sum":
+		fallthrough
+	case "directory-summary":
+		fallthrough
+	case "dir-summary":
+		fallthrough
+	case "sum":
+		fallthrough
+	case "summary":
+		return cmdSummary
+
+	case "eq":
+		fallthrough
+	case "equal":
+		fallthrough
+	case "chk":
+		fallthrough
+	case "check":
+		return cmdEqual
+
+	case "configuration":
+		fallthrough
+	case "config":
+		fallthrough
+	case "conf":
+		return cmdConfig
+
+	default:
+		return cmdUnknown
+	}
 }
 
 func main() {
@@ -1142,21 +1234,12 @@ func main() {
 		}
 	}
 
-	switch flag.Arg(0) {
-	case "directory-ls":
+	cmdID := parseCmd(flag.Arg(0))
+
+	switch cmdID {
+	case cmdList:
 		fallthrough
-	case "directory-list":
-		fallthrough
-	case "dir-ls":
-		fallthrough
-	case "dir-list":
-		fallthrough
-	case "ls":
-		fallthrough
-	case "list":
-	case "directory-tree":
-	case "dir-tree":
-	case "tree":
+	case cmdTree:
 		calcChecksumKinds = calcChecksumKinds[:1]
 
 	default:
@@ -1169,14 +1252,14 @@ func main() {
 	if flagHelp {
 		usageExitCode = 0
 	}
-	switch flag.Arg(0) {
-	case "eq":
-		fallthrough
-	case "equal":
-		fallthrough
-	case "chk":
-		fallthrough
-	case "check":
+
+	switch cmdID {
+	case cmdConfig:
+		if flagHelp || len(flag.Args()) < 1 {
+			fullUsageCmdConfig(usageExitCode)
+		}
+
+	case cmdEqual:
 		if flagHelp || len(flag.Args()) < 3 {
 			fullUsageCmdEqual(usageExitCode)
 		}
@@ -1209,69 +1292,51 @@ func main() {
 		}
 	}
 
-	m, err := Mtree(flag.Arg(1), cachingData, flagFilter, flagProgress)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+	// Create an mtree
+	var mtree *MTnode
+	switch cmdID {
+	case cmdList:
+		fallthrough
+	case cmdTree:
+		fallthrough
+	case cmdInfo:
+		fallthrough
+	case cmdSummary:
+		fallthrough
+	case cmdEqual:
+		m, err := Mtree(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		mtree = m
 	}
 
-	switch flag.Arg(0) {
-	case "directory-ls":
-		fallthrough
-	case "directory-list":
-		fallthrough
-	case "dir-ls":
-		fallthrough
-	case "dir-list":
-		fallthrough
-	case "ls":
-		fallthrough
-	case "list":
-		p := m.parent
-		m.parent = nil
-		prntListMtreed(m, false, flagUI, "")
-		m.parent = p
-	case "directory-tree":
-	case "dir-tree":
-	case "tree":
-		p := m.parent
-		m.parent = nil
-		prntListMtreed(m, true, flagUI, "")
-		m.parent = p
+	switch cmdID {
+	case cmdList:
+		p := mtree.parent
+		mtree.parent = nil
+		prntListMtreed(mtree, false, flagUI, "")
+		mtree.parent = p
+	case cmdTree:
+		p := mtree.parent
+		mtree.parent = nil
+		prntListMtreed(mtree, true, flagUI, "")
+		mtree.parent = p
 
-	case "directory-information":
-		fallthrough
-	case "dir-information":
-		fallthrough
-	case "information":
-		fallthrough
-	case "directory-info":
-		fallthrough
-	case "dir-info":
-		fallthrough
-	case "info":
-		prntInfoMtreed(m, cachingData, flagUI)
+	case cmdInfo:
+		p := mtree.parent
+		mtree.parent = nil
+		prntInfoMtreed(mtree, cachingData, flagUI)
+		mtree.parent = p
 
-	case "directory-sum":
-		fallthrough
-	case "dir-sum":
-		fallthrough
-	case "directory-summary":
-		fallthrough
-	case "dir-summary":
-		fallthrough
-	case "sum":
-		fallthrough
-	case "summary":
-		prntInfoMtree(m, cachingData, flagUI)
+	case cmdSummary:
+		p := mtree.parent
+		mtree.parent = nil
+		prntInfoMtree(mtree, cachingData, flagUI)
+		mtree.parent = p
 
-	case "eq":
-		fallthrough
-	case "equal":
-		fallthrough
-	case "chk":
-		fallthrough
-	case "check":
+	case cmdEqual:
 		chkArgs := flag.Args()[2:]
 		chkDone := make([]bool, len(chkArgs))
 		failedChecksum := false
@@ -1285,7 +1350,7 @@ func main() {
 				}
 
 				argCsum := arg[len(csum)+1:]
-				fndCsum := b2s(m.Checksum(csum))
+				fndCsum := b2s(mtree.Checksum(csum))
 				if !strings.HasPrefix(fndCsum, argCsum) {
 					fmt.Fprintln(os.Stderr, "Failed checksum:", csum, arg)
 					failedChecksum = true
@@ -1307,8 +1372,33 @@ func main() {
 			os.Exit(4)
 		}
 
+	case cmdConfig:
+		// https://ini.unknwon.io/docs/intro/getting_started
+		usr, err := user.Current()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "user:", err)
+			os.Exit(1)
+		}
+		path := fmt.Sprintf("%s/.config/mtree/config", usr.HomeDir)
+		cfg, err := ini.Load(path)
+		if err != nil {
+			fmt.Printf("Fail to read file: %v", err)
+			os.Exit(1)
+		}
+
+		fmt.Println("[core]")
+		for _, key := range []string{"progress", "ui", "ui-checksum-length",
+			"checksums"} {
+			fmt.Println(key, "=", cfg.Section("core").Key(key))
+		}
+
+		fmt.Println("[alias]")
+		for _, key := range cfg.Section("alias").KeyStrings() {
+			fmt.Println(key, "=", cfg.Section("alias").Key(key))
+		}
+
 	default:
-		fmt.Fprintln(os.Stderr, "Usage: mtree check|list|summary|tree <dir> [checks...]")
+		usageCmdDef()
 		os.Exit(1)
 	}
 }
