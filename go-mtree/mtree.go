@@ -507,8 +507,8 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 		}
 
 		// Timing the walk...
-		fmt.Println("JDBG: BEG:", time.Now())
-		defer func() { fmt.Println("JDBG: END:", time.Now()) }()
+		// fmt.Println("JDBG: BEG:", time.Now())
+		// defer func() { fmt.Println("JDBG: END:", time.Now()) }()
 
 		pparent := ""
 		ppent := root
