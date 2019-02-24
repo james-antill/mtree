@@ -485,12 +485,23 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 			}
 		}
 
-		if _, err := os.Stat(wroot); err != nil {
+		rootFI, err := os.Stat(wroot)
+		if err != nil {
 			errc <- err
 			return
 		}
 
 		root := rootRes()
+
+		if !rootFI.IsDir() {
+			ppent, _ := ensureParentDir(root, wroot, "", root)
+			name := path.Base(wroot)
+			res := newRes(ppent, name, rootFI.Mode())
+			nodes <- res
+			nodes <- root
+			errc <- nil
+			return
+		}
 
 		// Timing the walk...
 		fmt.Println("JDBG: BEG:", time.Now())
@@ -951,6 +962,7 @@ func b2s(b []byte) string {
 	return fmt.Sprintf("%x", b)
 }
 
+// FIXME: This doesn't do any caching, Eg. Size()
 func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 	primaryChecksum := calcChecksumKinds[0]
 	chksum := b2s(r.Checksum(primaryChecksum))
@@ -989,6 +1001,65 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 	for _, c := range r.Children() {
 		prntListMtreed(c, tree, ui, sizePrefix)
 	}
+}
+
+// FIXME: This doesn't do any caching, Eg. Num() and LatestModTime()
+func prntInfoMtreeIn(node *MTnode, cachingData, ui bool,
+	checksumKindMaxLen int) {
+	fmt.Println("Name:", node.Path())
+	// p := message.NewPrinter(message.MatchLanguage("en"))
+	// p.Println("  Num     :", m.Num())
+	if node.IsDir() {
+		fmt.Println("  Num     :", _muin(ui, int64(node.Num())))
+	}
+	fmt.Println("  Size    :", _muinb(ui, node.Size()))
+	if cachingData {
+		timeFmt := time.RFC3339Nano
+		if ui { // Similar, but with spaces...
+			timeFmt = "2006-01-02 15:04:05.999999999 Z07:00"
+		}
+		fmt.Println("  Mod Time:", node.LatestModTime().Format(timeFmt))
+	}
+	for _, csum := range calcChecksumKinds {
+		// Cache dir. checksum so it doesn't stop in the middle of the line
+		node.Checksum(csum)
+		fmt.Printf("    %-*s: %s\n", 4+checksumKindMaxLen, "Chk-"+csum,
+			b2s(node.Checksum(csum)))
+	}
+}
+
+func prntMaxChecsumKindLen() int {
+	mlen := 0
+	for _, csum := range calcChecksumKinds {
+		if len(csum) > mlen {
+			mlen = len(csum)
+		}
+	}
+	return mlen
+}
+
+func prntInfoMtree(node *MTnode, cachingData, ui bool) {
+	prntInfoMtreeIn(node, cachingData, ui, prntMaxChecsumKindLen())
+}
+
+func prntInfoMtreedIn(node *MTnode, cachingData, ui bool,
+	checksumKindMaxLen int) {
+	leafOnly := false
+	if !leafOnly || !node.IsDir() || len(node.children) == 0 {
+		prntInfoMtreeIn(node, cachingData, ui, checksumKindMaxLen)
+	}
+
+	if !node.IsDir() {
+		return
+	}
+
+	for _, c := range node.Children() {
+		prntInfoMtreedIn(c, cachingData, ui, checksumKindMaxLen)
+	}
+}
+
+func prntInfoMtreed(node *MTnode, cachingData, ui bool) {
+	prntInfoMtreedIn(node, cachingData, ui, prntMaxChecsumKindLen())
 }
 
 func usageCmdEqual() {
@@ -1168,6 +1239,19 @@ func main() {
 		prntListMtreed(m, true, flagUI, "")
 		m.parent = p
 
+	case "directory-information":
+		fallthrough
+	case "dir-information":
+		fallthrough
+	case "information":
+		fallthrough
+	case "directory-info":
+		fallthrough
+	case "dir-info":
+		fallthrough
+	case "info":
+		prntInfoMtreed(m, cachingData, flagUI)
+
 	case "directory-sum":
 		fallthrough
 	case "dir-sum":
@@ -1179,30 +1263,7 @@ func main() {
 	case "sum":
 		fallthrough
 	case "summary":
-		fmt.Println("Name:", m.Path())
-		// p := message.NewPrinter(message.MatchLanguage("en"))
-		// p.Println("  Num     :", m.Num())
-		fmt.Println("  Num     :", _muin(flagUI, int64(m.Num())))
-		fmt.Println("  Size    :", _muinb(flagUI, m.Size()))
-		if cachingData {
-			timeFmt := time.RFC3339Nano
-			if flagUI { // Similar, but with spaces...
-				timeFmt = "2006-01-02 15:04:05.999999999 Z07:00"
-			}
-			fmt.Println("  Mod Time:", m.LatestModTime().Format(timeFmt))
-		}
-		mchks := 0
-		for _, csum := range calcChecksumKinds {
-			if len(csum) > mchks {
-				mchks = len(csum)
-			}
-		}
-		for _, csum := range calcChecksumKinds {
-			// Cache dir. checksum so it doesn't stop in the middle of the line
-			m.Checksum(csum)
-			fmt.Printf("    %-*s: %s\n", 4+mchks, "Chk-"+csum,
-				b2s(m.Checksum(csum)))
-		}
+		prntInfoMtree(m, cachingData, flagUI)
 
 	case "eq":
 		fallthrough
