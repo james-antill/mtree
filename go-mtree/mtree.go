@@ -42,18 +42,20 @@ func (chk Checksum) String() string {
 	return fmt.Sprintf("%s:%s", chk.Kind, chk.Data)
 }
 
-// A MTnode is the part fo the merkle tree for a file.
+// MTnode is the common part of the merkle tree for a file/dir/symlink.
 type MTnode struct {
 	name       string
 	parent     *MTnode
 	csums      []Checksum
-	mode       os.FileMode
-	size       int64
-	mtimeNsecs int64
-	children   []*MTnode
-	err        error
+	size       int64     // Only useful for !isDir
+	mtimeNsecs int64     // Only useful for !isDir
+	children   []*MTnode // Only useful for  isDir
+	err        error     // Only useful during walk
 
 	sorted bool
+
+	isDir     bool
+	isSymlink bool
 }
 
 // Name of the node
@@ -63,17 +65,25 @@ func (r *MTnode) Name() string {
 
 // IsDir returns true if the node is a directory
 func (r *MTnode) IsDir() bool {
-	return r.mode.IsDir()
+	return r.isDir
 }
 
 // IsSymlink returns true if the node is a symlink
 func (r *MTnode) IsSymlink() bool {
-	return r.mode&os.ModeSymlink != 0
+	return r.isSymlink // .mode&os.ModeSymlink != 0
 }
 
 // IsRegular returns true if the node is a regular file
 func (r *MTnode) IsRegular() bool {
-	return r.mode.IsRegular()
+	return !r.isDir && !r.isSymlink
+}
+
+// ChildrenUnsorted of the node
+func (r *MTnode) ChildrenUnsorted() []*MTnode {
+	if !r.isDir {
+		return nil
+	}
+	return r.children
 }
 
 func fcmp(a, b string) int {
@@ -93,8 +103,9 @@ func fcmpLess(a, b string) bool {
 // Children gives you the sorted children of this node.
 func (r *MTnode) Children() []*MTnode {
 	if !r.sorted {
-		sort.Slice(r.children, func(i, j int) bool {
-			return fcmpLess(r.children[i].name, r.children[j].name)
+		children := r.ChildrenUnsorted()
+		sort.Slice(children, func(i, j int) bool {
+			return fcmpLess(children[i].name, children[j].name)
 		})
 		r.sorted = true
 	}
@@ -293,20 +304,41 @@ func (r *MTnode) Num() int {
 	return num
 }
 
-func (r *MTnode) dpath() string {
+// dpathLen is the length of allocation needed for dpath()
+func (r *MTnode) dpathLen() int {
 	if !r.IsDir() {
 		panic(r)
 	}
-	if r.parent == nil {
-		if r.name == "/" {
-			return r.name
-		}
-		return r.name + "/"
+
+	ret := len(r.name)
+	if r.parent != nil {
+		ret += r.parent.dpathLen()
 	}
-	if r.name == "/" {
+	if r.name != "/" {
+		ret++
+	}
+
+	return ret
+}
+
+// dpath is the directory path of the node, should only be called on dirs.
+func (r *MTnode) dpath(b *strings.Builder) {
+	if !r.IsDir() {
 		panic(r)
 	}
-	return r.parent.dpath() + r.name + "/"
+
+	if r.parent != nil {
+		if r.name == "/" {
+			panic(r)
+		}
+		r.parent.dpath(b)
+	}
+
+	b.WriteString(r.name)
+	if r.name == "/" { // Don't double /
+		return
+	}
+	b.WriteByte('/')
 }
 
 // Path gives the full path to the node
@@ -317,11 +349,17 @@ func (r *MTnode) Path() string {
 	if r.name == "/" {
 		panic(r)
 	}
-	return r.parent.dpath() + r.name
+
+	var b strings.Builder
+	b.Grow(r.parent.dpathLen() + len(r.name))
+	r.parent.dpath(&b)
+	b.WriteString(r.name)
+	return b.String()
 }
 
 func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
-	res := &MTnode{name: base, parent: dres, mode: mode}
+	res := &MTnode{name: base, parent: dres,
+		isDir: mode.IsDir(), isSymlink: mode&os.ModeSymlink != 0}
 	if dres != nil && res.name == "/" {
 		panic(res)
 	}
@@ -1379,6 +1417,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "user:", err)
 			os.Exit(1)
 		}
+		// FIXME: Use XDG_CONFIG_HOME?
 		path := fmt.Sprintf("%s/.config/mtree/config", usr.HomeDir)
 		cfg, err := ini.Load(path)
 		if err != nil {
