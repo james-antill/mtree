@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -137,5 +138,38 @@ func TestHashes(t *testing.T) {
 	if ret := b2s(c.Sum(nil)); ret != res {
 		t.Errorf("chkNew->Write->shake-256-64 is bad: %s !=\n %s\n",
 			ret, res)
+	}
+}
+
+func TestFS(t *testing.T) {
+	data := []struct {
+		path string
+		filt bool
+		res  string
+	}{
+		{"test", true,
+			"0d80f3c5d6ce0c85f519dc34f22046f29c141805c3de0b638f410e00fbe5d926"},
+		{"test2", true,
+			"292295d1f73224f70bfe0f0e534ddace918050decca416cf4974b7f0cc41ce1c"},
+		{"test2", false,
+			"9e93de3b44736e9ad5076fc696a7f1af330a0aae0b7b10402a3de0063daaa0d1"},
+	}
+
+	for i := range data {
+		path := data[i].path
+		filt := data[i].filt
+		res := data[i].res
+
+		root, err := MtreePath(path, false, filt, false)
+		if err != nil {
+			t.Errorf("MtreePath(%s): %v\n", path, err)
+			return
+		}
+
+		val := fmt.Sprintf("%x", root.Checksum("sha256"))
+		if val != res {
+			t.Errorf("root is bad(%s): %s !=\n %s\n",
+				path, val, res)
+		}
 	}
 }
