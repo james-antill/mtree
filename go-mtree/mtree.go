@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
-	"errors"
 	"flag"
 	"fmt"
 	"hash"
@@ -40,6 +39,22 @@ type Checksum struct {
 
 func (chk Checksum) String() string {
 	return fmt.Sprintf("%s:%s", chk.Kind, chk.Data)
+}
+
+var numCPUWorkers = 0
+
+func numCPUDigesters() int {
+	numDigesters := numCPUWorkers
+	if numDigesters < 1 {
+		numDigesters = runtime.NumCPU()
+	}
+	if numDigesters >= 1 {
+		numDigesters *= 2
+	} else {
+		numDigesters = 2
+	}
+
+	return numDigesters
 }
 
 // MTnode is the common part of the merkle tree for a file/dir/symlink.
@@ -196,8 +211,63 @@ func checksumFile(r *MTnode, kind string) {
 
 const hextable = "0123456789abcdef"
 
+func (r *MTnode) findCsum(kind string) *Checksum {
+	for i := range r.csums {
+		v := &r.csums[i]
+		if v.Kind == kind {
+			return v
+		}
+	}
+	return nil
+}
+
+func (r *MTnode) childrenEmptyChecksum(kind string, d chan<- *MTnode) {
+	if r.findCsum(kind) != nil {
+		return
+	}
+
+	if r.IsDir() {
+		for _, child := range r.Children() {
+			child.childrenEmptyChecksum(kind, d)
+		}
+		return
+	}
+
+	d <- r
+}
+
+func (r *MTnode) childrenSetupChecksums(kind string, limit int) chan<- *MTnode {
+	if limit <= 0 {
+		limit = numCPUDigesters()
+	}
+
+	sem := make(chan int, limit) // Use optional workers
+	data := make(chan *MTnode)
+	go func() {
+		defer close(data)
+		r.childrenEmptyChecksum(kind, data)
+	}()
+
+	for c := range data {
+		sem <- 0
+		go func(child *MTnode) {
+			child.Checksum(kind)
+			<-sem
+		}(c)
+	}
+
+	for i := 0; i < limit; i++ {
+		sem <- 0
+	}
+	return data
+}
+
 // Checksum gives the hash of the directory and all children
 func (r *MTnode) Checksum(kind string) []byte {
+	if kind == "" {
+		kind = calcChecksumKinds[0]
+	}
+
 	for _, csum := range r.csums {
 		if csum.Kind == kind {
 			return csum.Data
@@ -208,9 +278,6 @@ func (r *MTnode) Checksum(kind string) []byte {
 		return nil
 	}
 
-	// Files/symlinks get done in go procs. and combine all caclChecksums
-	// but we still have code here anyway for future.
-
 	// Is a file/symlink...
 	// Checksum the data within the file...
 	if r.IsSymlink() {
@@ -219,8 +286,10 @@ func (r *MTnode) Checksum(kind string) []byte {
 	} else if !r.IsDir() {
 		checksumFile(r, kind)
 		if r.err != nil {
+			if kind == "" {
+				kind = calcChecksumKinds[0]
+			}
 			c := data2csum(kind, []byte{})
-			r.csums = append(r.csums, Checksum{kind, c})
 			return c
 		}
 		return r.Checksum(kind)
@@ -230,18 +299,7 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// merge all the data from all the children...
 
 	// For large sets this can be slow, so parallel ftw.
-	var wg sync.WaitGroup
-	for _, child := range r.Children() {
-		if !child.IsDir() {
-			continue
-		}
-		wg.Add(1)
-		go func(c *MTnode) {
-			defer wg.Done()
-			c.Checksum(kind)
-		}(child)
-	}
-	wg.Wait()
+	r.childrenSetupChecksums(kind, 0)
 
 	var dd bytes.Buffer
 	for _, child := range r.Children() {
@@ -499,11 +557,31 @@ func mustAbs(path string) string {
 	return ret
 }
 
+func normPath(root string) (string, error) {
+	root = mustAbs(root)
+
+	fi, err := os.Lstat(root)
+	if err != nil {
+		return "", err
+	}
+
+	hfi := FileMode{fi.Mode()}
+	if hfi.IsSymlink() {
+		nr, err := filepath.EvalSymlinks(root)
+		if err != nil {
+			return "", err
+		}
+		return nr, nil
+	}
+
+	return root, nil
+}
+
 // walkFiles starts a goroutine to walk the directory tree at root and send the
 // node of each file to the node channel.  It sends the result of the
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
-func walkFiles(done <-chan struct{}, wroot string, qlen int,
+func walkFiles(wroot string, qlen int,
 	needCachingData, filter, progress bool) (<-chan *MTnode, int64, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
@@ -511,20 +589,6 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 	go func() {
 		// Close the channel after Walk returns.
 		defer close(nodes)
-
-		wroot := mustAbs(wroot)
-
-		if fi, err := os.Lstat(wroot); err == nil {
-			hfi := FileMode{fi.Mode()}
-			if hfi.IsSymlink() {
-				nr, err := filepath.EvalSymlinks(wroot)
-				if err != nil {
-					errc <- err
-					return
-				}
-				wroot = nr
-			}
-		}
 
 		rootFI, err := os.Stat(wroot)
 		if err != nil {
@@ -582,11 +646,12 @@ func walkFiles(done <-chan struct{}, wroot string, qlen int,
 					// FIXME: If it's wanted, fill in uid/etc.
 				}
 
-				select {
-				case nodes <- res:
-				case <-done:
-					return errors.New("walk canceled")
-				}
+				nodes <- res
+				//				select {
+				//				case nodes <- res:
+				//				case <-done:
+				//					return errors.New("walk canceled")
+				//				}
 				return nil
 			},
 			ErrorCallback: func(p string, e error) godirwalk.ErrorAction {
@@ -798,42 +863,26 @@ func chkNew(csum string) hash.Hash {
 	}
 }
 
-// digester gets nodes for files/symlinks and creates the checksum data for them.
-func digester(done <-chan struct{}, paths <-chan *MTnode, c chan<- *MTnode,
-	dbar *mpb.Bar) {
+// digest gets data for files/symlinks and creates the checksum data for them.
+func digest(res *MTnode, dbar *mpb.Bar) {
+	if res == nil {
+		panic("res is nil")
+	}
+
+	if !res.IsDir() {
+		res.Checksum("")
+	}
+
+	if dbar != nil {
+		dbar.Increment()
+	}
+}
+
+// digestWorker walks a work queue and calls digest()
+func digestWorker(done chan<- *MTnode, paths <-chan *MTnode, dbar *mpb.Bar) {
 	for res := range paths {
-
-		if res == nil {
-			panic("res is nil")
-		}
-
-		if res.name == "/" {
-			if dbar != nil {
-				dbar.Increment()
-			}
-			// Should be the last one...
-			select {
-			case c <- res:
-			case <-done:
-				return
-			}
-		}
-
-		if res.IsRegular() {
-			checksumFile(res, "")
-		} else if res.IsSymlink() {
-			checksumSymlink(res, "")
-		}
-
-		if dbar != nil {
-			dbar.Increment()
-		}
-
-		select {
-		case c <- res:
-		case <-done:
-			return
-		}
+		digest(res, dbar)
+		done <- res
 	}
 }
 
@@ -851,25 +900,20 @@ func first(r *MTnode) *MTnode {
 	return first(r.children[0])
 }
 
-var numCPUWorkers = 0
+// MtreePath Generate data from FS for root path
+func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, error) {
 
-// Mtree Generate for root path
-func Mtree(root string, needCachingData, filter, progress bool) (*MTnode, error) {
-	done := make(chan struct{})
-	defer close(done)
+	numDigesters := numCPUDigesters()
 
-	numDigesters := numCPUWorkers
-	if numDigesters < 1 {
-		numDigesters = runtime.NumCPU()
-	}
-	if numDigesters < 1 {
-		numDigesters = 1
+	root, err := normPath(root)
+	if err != nil {
+		return nil, err
 	}
 
-	nodes, nnodes, errc := walkFiles(done, root, numDigesters,
+	nodes, nnodes, errc := walkFiles(root, numDigesters,
 		needCachingData, filter, progress)
 
-	c := make(chan *MTnode)
+	done := make(chan *MTnode)
 
 	var wg sync.WaitGroup
 
@@ -882,7 +926,7 @@ func Mtree(root string, needCachingData, filter, progress bool) (*MTnode, error)
 	wg.Add(numDigesters)
 	for i := 0; i < numDigesters; i++ {
 		go func() {
-			digester(done, nodes, c, dbar)
+			digestWorker(done, nodes, dbar)
 			wg.Done()
 		}()
 	}
@@ -891,11 +935,11 @@ func Mtree(root string, needCachingData, filter, progress bool) (*MTnode, error)
 		if p != nil {
 			p.Stop()
 		}
-		close(c)
+		close(done)
 	}()
 
 	var ret *MTnode
-	for r := range c {
+	for r := range done {
 		if r.err != nil {
 			fmt.Fprintln(os.Stderr, r.err)
 		}
@@ -903,12 +947,16 @@ func Mtree(root string, needCachingData, filter, progress bool) (*MTnode, error)
 			ret = r
 		}
 	}
-	ret = first(ret) // Skip the usuless root nodes
 
 	// Check whether the Walk failed.
 	if err := <-errc; err != nil { // HLerrc
 		return nil, err
 	}
+
+	// Walk to the starting point:
+	ret = ensureDir(ret, root)
+	//	ret = first(ret) // Skip the usuless root nodes
+
 	return ret, nil
 }
 
@@ -1342,7 +1390,7 @@ func main() {
 	case cmdSummary:
 		fallthrough
 	case cmdEqual:
-		m, err := Mtree(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		m, err := MtreePath(flag.Arg(1), cachingData, flagFilter, flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
