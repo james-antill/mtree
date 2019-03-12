@@ -152,7 +152,7 @@ func TestFS(t *testing.T) {
 		{"test2", true,
 			"292295d1f73224f70bfe0f0e534ddace918050decca416cf4974b7f0cc41ce1c"},
 		{"test2", false,
-			"9e93de3b44736e9ad5076fc696a7f1af330a0aae0b7b10402a3de0063daaa0d1"},
+			"de2d361c0f794b092a3039affe74b06d4e629de3aab6e6915c48ee5dea9cb9cc"},
 	}
 
 	for i := range data {
