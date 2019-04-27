@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"hash"
 	"io"
 	"os"
 	"os/user"
@@ -168,27 +167,16 @@ func checksumFile(r *MTnode, kind string) {
 	}
 	defer ior.Close()
 
-	chks := []hash.Hash{}
-	chksio := []io.Writer{}
-	for _, csum := range csums {
-		c := chkNew(csum)
-		chks = append(chks, c)
-		chksio = append(chksio, c)
-	}
+	ah := autohashNew(csums...)
 
-	iow := io.MultiWriter(chksio...)
-
-	written, err := io.Copy(iow, ior)
+	written, err := io.Copy(ah, ior)
 	if err != nil {
 		r.err = err
 		return
 	}
 	r.size = written
 
-	r.csums = nil
-	for i, csum := range csums {
-		r.csums = append(r.csums, Checksum{csum, chks[i].Sum(nil)})
-	}
+	r.csums = ah.Checksums()
 }
 
 const hextable = "0123456789abcdef"
@@ -865,8 +853,14 @@ func b2s(b []byte) string {
 func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 	primaryChecksum := calcChecksumKinds[0]
 	chksum := b2s(r.Checksum(primaryChecksum))
-	if ui && primaryChecksumUILen > 0 {
-		chksum = chksum[:primaryChecksumUILen]
+	if ui {
+		uilen := primaryChecksumUILen
+		if uilen < len(chksum) {
+			uilen = 0
+		}
+		if uilen > 0 {
+			chksum = chksum[:primaryChecksumUILen]
+		}
 	}
 
 	fn := r.Path()

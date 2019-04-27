@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"crypto/sha512"
 	"hash"
+	"io"
 
+	"github.com/cespare/xxhash"
+	"github.com/dgryski/dgohash"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -55,8 +58,23 @@ func data2csum(csum string, data []byte) []byte {
 		val := ShakeSum256_64(data)
 		return val[:]
 
+	case "djb2":
+		h := dgohash.NewDjb32()
+		h.Write(data)
+		return h.Sum(nil)
+
+	case "sdbm":
+		h := dgohash.NewSDBM32()
+		h.Write(data)
+		return h.Sum(nil)
+
+	case "xxh64":
+		h := xxhash.New()
+		h.Write(data)
+		return h.Sum(nil)
+
 	default:
-		panic("Bad csum" + csum)
+		panic("Bad csum: " + csum)
 	}
 }
 
@@ -92,15 +110,25 @@ func chkNew(csum string) hash.Hash {
 	case "shake-256-64":
 		return &shake2hash64{sha3.NewShake256()}
 
+	case "djb2":
+		return dgohash.NewDjb32()
+
+	case "sdbm":
+		return dgohash.NewSDBM32()
+
+	case "xxh64":
+		return xxhash.New()
+
 	default:
-		panic("Bad csum" + csum)
+		panic("Bad csum: " + csum)
 	}
 }
 
 var validChecksumKinds = [...]string{"md5", "sha1",
 	"sha224", "sha256", "sha384", "sha512", "sha512-224", "sha512-256",
 	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
-	"shake-128-32", "shake-256-64"}
+	"shake-128-32", "shake-256-64",
+	"djb2", "sdbm", "xxh64"}
 
 func validChecksum(kind string) bool {
 	csums := validChecksumKinds
@@ -113,4 +141,38 @@ func validChecksum(kind string) bool {
 	}
 	return false
 
+}
+
+type autohash struct {
+	iow   io.Writer
+	csums []string
+	hs    []hash.Hash
+}
+
+func (a *autohash) Write(p []byte) (n int, err error) {
+	return a.iow.Write(p)
+}
+
+func (a *autohash) Checksums() []Checksum {
+	var csums []Checksum
+
+	for i, csum := range a.csums {
+		csums = append(csums, Checksum{csum, a.hs[i].Sum(nil)})
+	}
+
+	return csums
+}
+
+func autohashNew(csums ...string) *autohash {
+	chks := []hash.Hash{}
+	chksio := []io.Writer{}
+	for _, csum := range csums {
+		c := chkNew(csum)
+		chks = append(chks, c)
+		chksio = append(chksio, c)
+	}
+
+	iow := io.MultiWriter(chksio...)
+
+	return &autohash{iow, csums, chks}
 }
