@@ -62,6 +62,10 @@ func data2csum(csum string, data []byte) []byte {
 		h := dgohash.NewDjb32()
 		h.Write(data)
 		return h.Sum(nil)
+	case "djb2a":
+		h := dgohash.NewDjb32a()
+		h.Write(data)
+		return h.Sum(nil)
 
 	case "sdbm":
 		h := dgohash.NewSDBM32()
@@ -112,6 +116,8 @@ func chkNew(csum string) hash.Hash {
 
 	case "djb2":
 		return dgohash.NewDjb32()
+	case "djb2a":
+		return dgohash.NewDjb32a()
 
 	case "sdbm":
 		return dgohash.NewSDBM32()
@@ -128,7 +134,7 @@ var validChecksumKinds = [...]string{"md5", "sha1",
 	"sha224", "sha256", "sha384", "sha512", "sha512-224", "sha512-256",
 	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
 	"shake-128-32", "shake-256-64",
-	"djb2", "sdbm", "xxh64"}
+	"djb2", "djb2a", "sdbm", "xxh64"}
 
 func validChecksum(kind string) bool {
 	csums := validChecksumKinds
