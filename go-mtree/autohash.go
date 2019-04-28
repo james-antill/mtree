@@ -7,9 +7,14 @@ import (
 	"crypto/sha512"
 	"hash"
 	"io"
+	"sort"
 
 	"github.com/cespare/xxhash"
+	// djb2/djb2a/sdbm
 	"github.com/dgryski/dgohash"
+	// github.com/spaolacci/murmur3 is more popular, but twmb seemed to have
+	// more testing and amd64 asm.
+	"github.com/twmb/murmur3"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -77,6 +82,19 @@ func data2csum(csum string, data []byte) []byte {
 		h.Write(data)
 		return h.Sum(nil)
 
+	case "murmur3-32":
+		h := murmur3.New32()
+		h.Write(data)
+		return h.Sum(nil)
+	case "murmur3-64":
+		h := murmur3.New64()
+		h.Write(data)
+		return h.Sum(nil)
+	case "murmur3-128":
+		h := murmur3.New128()
+		h.Write(data)
+		return h.Sum(nil)
+
 	default:
 		panic("Bad csum: " + csum)
 	}
@@ -125,28 +143,39 @@ func chkNew(csum string) hash.Hash {
 	case "xxh64":
 		return xxhash.New()
 
+	case "murmur3-32":
+		return murmur3.New32()
+	case "murmur3-64":
+		return murmur3.New64()
+	case "murmur3-128":
+		return murmur3.New128()
+
 	default:
 		panic("Bad csum: " + csum)
 	}
 }
 
-var validChecksumKinds = [...]string{"md5", "sha1",
+var validChecksumKinds = []string{"md5", "sha1",
 	"sha224", "sha256", "sha384", "sha512", "sha512-224", "sha512-256",
 	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
 	"shake-128-32", "shake-256-64",
-	"djb2", "djb2a", "sdbm", "xxh64"}
+	// These are the non-crypto "fast" hashes...
+	"djb2", "djb2a", "sdbm", "xxh64",
+	"murmur3-32", "murmur3-64", "murmur3-128"}
+var validChecksumSorted = false
 
+// validChecksum checks the kind is valid, uses sort.SearchStrings
 func validChecksum(kind string) bool {
-	csums := validChecksumKinds
+	if !validChecksumSorted {
+		sort.Strings(validChecksumKinds)
+		validChecksumSorted = true
+	}
 
-	// Check it's an apporved checksum
-	for _, csum := range csums {
-		if csum == kind {
-			return true
-		}
+	i := sort.SearchStrings(validChecksumKinds, kind)
+	if i < len(validChecksumKinds) && validChecksumKinds[i] == kind {
+		return true
 	}
 	return false
-
 }
 
 type autohash struct {

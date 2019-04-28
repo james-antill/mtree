@@ -129,9 +129,68 @@ func (r *MTnode) add(c *MTnode) {
 	r.csums = nil
 }
 
-// var calcChecksumKinds = validChecksumKinds[:]
-var calcChecksumKinds = []string{"md5", "sha1", "sha256"}
-var primaryChecksumUILen = 16
+// calcChecksumKinds is the checksums we want to calculate on the data.
+var calcChecksumKinds = []string{"md5", "sha1", "sha256",
+	"murmur3-128", "shake-256-64"}
+
+// calcChecksumKindPrimary is the checksum we want when we are only using one.
+var calcChecksumKindPrimary = "sha256"
+
+// calcChecksumsReset empties the list of checksums we'll calculate, must add
+// at least one
+func calcChecksumsReset() {
+	calcChecksumKinds = []string{}
+	calcChecksumKindPrimary = ""
+}
+
+// calcChecksumsAdd adds a new checksum to what we'll calculate
+func calcChecksumsAdd(chksum string) bool {
+	if !validChecksum(chksum) {
+		return false
+	}
+
+	if calcChecksumKindPrimary == "" {
+		calcChecksumKindPrimary = chksum
+	}
+
+	for _, ochksum := range calcChecksumKinds {
+		if chksum == ochksum {
+			return false
+		}
+	}
+
+	calcChecksumKinds = append(calcChecksumKinds, chksum)
+	return true
+}
+
+// calcChecksumsDone sorts the checksums
+func calcChecksumsDone() {
+	if calcChecksumKindPrimary == "" {
+		panic("calcChecksumKindPrimary is unset")
+	}
+	sort.Strings(calcChecksumKinds)
+}
+
+// calcChecksumsUI produces ordered output for initialization UI, where the
+// first argument is the primary.
+func calcChecksumsUI() []string {
+	calcChecksumsDone()
+
+	ocsums := make([]string, len(calcChecksumKinds))
+	ocsums = ocsums[0:0]
+	ocsums = append(ocsums, calcChecksumKindPrimary)
+	for _, chksum := range calcChecksumKinds {
+		if chksum == calcChecksumKindPrimary {
+			continue
+		}
+		ocsums = append(ocsums, chksum)
+	}
+
+	return ocsums
+}
+
+// uiChecksumLen is how much of the checksum we show when we want to be smaller
+var uiChecksumLen = 16
 
 func checksumSymlink(r *MTnode, kind string) {
 	// Currently do all the checksums for files...
@@ -156,7 +215,6 @@ func checksumSymlink(r *MTnode, kind string) {
 
 func checksumFile(r *MTnode, kind string) {
 	// Currently do all the checksums for files...
-	csums := calcChecksumKinds
 
 	path := r.Path()
 
@@ -167,7 +225,7 @@ func checksumFile(r *MTnode, kind string) {
 	}
 	defer ior.Close()
 
-	ah := autohashNew(csums...)
+	ah := autohashNew(calcChecksumKinds...)
 
 	written, err := io.Copy(ah, ior)
 	if err != nil {
@@ -235,7 +293,7 @@ func (r *MTnode) childrenSetupChecksums(kind string, limit int) chan<- *MTnode {
 // Checksum gives the hash of the directory and all children
 func (r *MTnode) Checksum(kind string) []byte {
 	if kind == "" {
-		kind = calcChecksumKinds[0]
+		kind = calcChecksumKindPrimary
 	}
 
 	for _, csum := range r.csums {
@@ -256,9 +314,6 @@ func (r *MTnode) Checksum(kind string) []byte {
 	} else if !r.IsDir() {
 		checksumFile(r, kind)
 		if r.err != nil {
-			if kind == "" {
-				kind = calcChecksumKinds[0]
-			}
 			c := data2csum(kind, []byte{})
 			return c
 		}
@@ -851,15 +906,14 @@ func b2s(b []byte) string {
 
 // FIXME: This doesn't do any caching, Eg. Size()
 func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
-	primaryChecksum := calcChecksumKinds[0]
-	chksum := b2s(r.Checksum(primaryChecksum))
+	chksum := b2s(r.Checksum(calcChecksumKindPrimary))
 	if ui {
-		uilen := primaryChecksumUILen
+		uilen := uiChecksumLen
 		if uilen < len(chksum) {
 			uilen = 0
 		}
 		if uilen > 0 {
-			chksum = chksum[:primaryChecksumUILen]
+			chksum = chksum[:uiChecksumLen]
 		}
 	}
 
@@ -1077,20 +1131,20 @@ func main() {
 	isTermErr := terminal.IsTerminal(int(os.Stderr.Fd()))
 
 	flag.BoolVar(&flagUI, "ui", isTermOut, "Use UI output")
-	flag.BoolVar(&flagFast, "fast", false, "Only calc. primary checksum")
+	flag.BoolVar(&flagFast, "fast", false, "Weird speedups")
 	progUsage := "show progress bar"
 	flag.BoolVar(&flagProgress, "progress", isTermErr, progUsage)
 	flag.BoolVar(&flagProgress, "p", isTermErr, progUsage+" (shorthand)")
 	flag.BoolVar(&flagFilter, "filter", true, "filter useless entries")
-	flag.IntVar(&primaryChecksumUILen, "ui-checksum-length",
-		primaryChecksumUILen, "length of UI display checksum")
-	pchkDef := "md5,sha1,sha256,shake-256-64"
-	flag.StringVar(&flagPChecksum, "checksums", pchkDef, "what checksums to display/use")
+	flag.IntVar(&uiChecksumLen, "ui-checksum-length",
+		uiChecksumLen, "length of UI display checksum")
+	pchkDef := strings.Join(calcChecksumsUI(), ",")
+	flag.StringVar(&flagPChecksum, "checksums", pchkDef, "what checksums to use")
 	flag.IntVar(&numCPUWorkers, "workers",
-		primaryChecksumUILen, "manually set number of checksum workers")
+		uiChecksumLen, "manually set number of checksum workers")
 	flag.Parse()
 
-	if flagPChecksum != "" {
+	if flagPChecksum != "" && flagPChecksum != pchkDef {
 		f := func(c rune) bool {
 			switch c {
 			case ';':
@@ -1110,18 +1164,17 @@ func main() {
 			}
 		}
 
-		calcChecksumKinds = []string{}
+		calcChecksumsReset()
 		for _, csum := range strings.FieldsFunc(flagPChecksum, f) {
-			if validChecksum(csum) {
-				calcChecksumKinds = append(calcChecksumKinds, csum)
-			}
+			calcChecksumsAdd(csum)
 		}
-		if len(calcChecksumKinds) < 1 {
+		if calcChecksumKindPrimary == "" {
 			oneOf := strings.Join(validChecksumKinds[:], ", ")
 			fmt.Fprintf(os.Stderr, "Non-valid checksums flag: %s\n"+
 				" Choose from: %s\n", flagPChecksum, oneOf)
 			fullUsageCmdDef(1)
 		}
+		calcChecksumsDone()
 	}
 
 	cmdID := parseCmd(flag.Arg(0))
@@ -1130,7 +1183,8 @@ func main() {
 	case cmdList:
 		fallthrough
 	case cmdTree:
-		calcChecksumKinds = calcChecksumKinds[:1]
+		// This is a hack, but eh.
+		calcChecksumKinds = []string{calcChecksumKindPrimary}
 
 	default:
 	}
@@ -1155,7 +1209,11 @@ func main() {
 		}
 
 		// Overrides --checksums flag, but it's pointless otherwise.
-		calcChecksumKinds = []string{}
+		if flagPChecksum != "" {
+			fmt.Fprintln(os.Stderr, "Ignoring --checksum flag.")
+		}
+
+		calcChecksumsReset()
 		for _, arg := range flag.Args()[2:] {
 			i := strings.Index(arg, ":")
 			if i == -1 {
@@ -1173,8 +1231,9 @@ func main() {
 				usageCmdEqual()
 				os.Exit(1)
 			}
-			calcChecksumKinds = append(calcChecksumKinds, chkKind)
+			calcChecksumsAdd(chkKind)
 		}
+		calcChecksumsDone()
 
 	default:
 		if flagHelp || len(flag.Args()) != 2 {
