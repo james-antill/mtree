@@ -27,6 +27,9 @@ func data2csum(csum string, data []byte) []byte {
 		val := sha1.Sum(data)
 		return val[:]
 
+	case "sha224":
+		val := sha256.Sum224(data)
+		return val[:]
 	case "sha256":
 		val := sha256.Sum256(data)
 		return val[:]
@@ -107,6 +110,8 @@ func chkNew(csum string) hash.Hash {
 	case "sha1":
 		return sha1.New()
 
+	case "sha224":
+		return sha256.New224()
 	case "sha256":
 		return sha256.New()
 	case "sha384":

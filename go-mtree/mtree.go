@@ -61,6 +61,8 @@ type MTnode struct {
 	children   []*MTnode // Only useful for  isDir
 	err        error     // Only useful during walk
 
+	fsActive bool // Can we call into the FS to get checksums
+
 	sorted bool
 
 	isDir     bool
@@ -309,9 +311,15 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// Is a file/symlink...
 	// Checksum the data within the file...
 	if r.IsSymlink() {
+		if !r.fsActive {
+			return nil
+		}
 		checksumSymlink(r, kind)
 		return r.Checksum(kind)
 	} else if !r.IsDir() {
+		if !r.fsActive {
+			return nil
+		}
 		checksumFile(r, kind)
 		if r.err != nil {
 			c := data2csum(kind, []byte{})
@@ -331,6 +339,9 @@ func (r *MTnode) Checksum(kind string) []byte {
 		dd.WriteString(child.name)
 		dd.WriteByte(' ')
 		chk := child.Checksum(kind)
+		if chk == nil {
+			return nil
+		}
 		//		dd += fmt.Sprintf("%x", chk)
 		for _, b := range chk {
 			dd.WriteByte(hextable[b>>4])
@@ -453,6 +464,7 @@ func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
 		panic(res)
 	}
 	if dres != nil {
+		res.fsActive = dres.fsActive
 		dres.add(res)
 	}
 	//	fmt.Println("nres:", res.path())
@@ -622,6 +634,7 @@ func walkFiles(wroot string, qlen int,
 		}
 
 		root := rootRes()
+		root.fsActive = true
 
 		if !rootFI.IsDir() {
 			ppent, _ := ensureParentDir(root, wroot, "", root)
@@ -813,6 +826,20 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 	return ret, nil
 }
 
+// MtreePathOrFile Generate data from FS for root path, or from an mtree file
+func MtreePathOrFile(root string, needCachingData, filter, progress bool) (*MTnode, error) {
+
+	fi, err := os.Stat(root)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return MtreePath(root, needCachingData, filter, progress)
+	}
+
+	return MtreeFile(root, progress)
+}
+
 // UI names for KiloBytes etc.
 const (
 	KB = 1000
@@ -909,7 +936,7 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 	chksum := b2s(r.Checksum(calcChecksumKindPrimary))
 	if ui {
 		uilen := uiChecksumLen
-		if uilen < len(chksum) {
+		if uilen > len(chksum) {
 			uilen = 0
 		}
 		if uilen > 0 {
@@ -1044,6 +1071,10 @@ const (
 	cmdSummary
 	cmdEqual
 	cmdConfig
+	cmdSnapshot
+	cmdInitialize
+	cmdDifference
+	cmdFile
 )
 
 func parseCmd(cmd string) cmdType {
@@ -1110,6 +1141,22 @@ func parseCmd(cmd string) cmdType {
 	case "conf":
 		return cmdConfig
 
+	case "snapshot":
+		fallthrough
+	case "snap":
+		return cmdSnapshot
+
+	case "init":
+		return cmdInitialize
+
+	case "difference":
+		fallthrough
+	case "diff":
+		return cmdDifference
+
+	case "file": // FIXME:
+		return cmdFile
+
 	default:
 		return cmdUnknown
 	}
@@ -1141,7 +1188,7 @@ func main() {
 	pchkDef := strings.Join(calcChecksumsUI(), ",")
 	flag.StringVar(&flagPChecksum, "checksums", pchkDef, "what checksums to use")
 	flag.IntVar(&numCPUWorkers, "workers",
-		uiChecksumLen, "manually set number of checksum workers")
+		numCPUWorkers, "manually set number of checksum workers")
 	flag.Parse()
 
 	if flagPChecksum != "" && flagPChecksum != pchkDef {
@@ -1169,7 +1216,7 @@ func main() {
 			calcChecksumsAdd(csum)
 		}
 		if calcChecksumKindPrimary == "" {
-			oneOf := strings.Join(validChecksumKinds[:], ", ")
+			oneOf := strings.Join(validChecksumKinds, ", ")
 			fmt.Fprintf(os.Stderr, "Non-valid checksums flag: %s\n"+
 				" Choose from: %s\n", flagPChecksum, oneOf)
 			fullUsageCmdDef(1)
@@ -1225,7 +1272,7 @@ func main() {
 
 			chkKind := arg[:i]
 			if !validChecksum(chkKind) {
-				oneOf := strings.Join(validChecksumKinds[:], ", ")
+				oneOf := strings.Join(validChecksumKinds, ", ")
 				fmt.Fprintf(os.Stderr, "Unknown checksum: %s\n"+
 					" Choose one of: %s\n", chkKind, oneOf)
 				usageCmdEqual()
@@ -1235,6 +1282,11 @@ func main() {
 		}
 		calcChecksumsDone()
 
+	case cmdDifference:
+		if flagHelp || len(flag.Args()) != 3 {
+			fullUsageCmdConfig(usageExitCode)
+		}
+
 	default:
 		if flagHelp || len(flag.Args()) != 2 {
 			fullUsageCmdDef(usageExitCode)
@@ -1243,12 +1295,15 @@ func main() {
 
 	// Create an mtree
 	var mtree *MTnode
+	var omtree *MTnode
 	switch cmdID {
 	case cmdList:
 		fallthrough
 	case cmdTree:
 		fallthrough
 	case cmdInfo:
+		fallthrough
+	case cmdSnapshot:
 		fallthrough
 	case cmdSummary:
 		fallthrough
@@ -1259,6 +1314,36 @@ func main() {
 			os.Exit(2)
 		}
 		mtree = m
+
+	case cmdFile:
+		// FIXME: Need to set calcChecksumKinds
+		m, err := MtreeFile(flag.Arg(1), flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		mtree = m
+		cmdID = cmdInfo
+
+	case cmdDifference:
+		// FIXME: If dirs.
+		// diff = current vs. last snap ???
+		// diff x = current x vs. last snap
+		// diff dirx filey / filex diry = load snap from file and diff.
+
+		m1, err := MtreePathOrFile(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		omtree = m1
+
+		m2, err := MtreePathOrFile(flag.Arg(2), cachingData, flagFilter, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		mtree = m2
 	}
 
 	switch cmdID {
@@ -1346,6 +1431,24 @@ func main() {
 		for _, key := range cfg.Section("alias").KeyStrings() {
 			fmt.Println(key, "=", cfg.Section("alias").Key(key))
 		}
+
+	case cmdSnapshot:
+		p := mtree.parent
+		mtree.parent = nil
+		storeWriteFile(os.Stdout, mtree)
+		mtree.parent = p
+
+	case cmdInitialize:
+		// FIXME: mkdir(.mtree)
+	case cmdDifference:
+		for _, csum := range calcChecksumKinds {
+			mtree.Checksum(csum)
+		}
+
+		p := mtree.parent
+		mtree.parent = nil
+		prntDiff(omtree, mtree, false, flagUI)
+		mtree.parent = p
 
 	default:
 		usageCmdDef()
