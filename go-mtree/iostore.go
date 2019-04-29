@@ -30,7 +30,11 @@ func storeWriteNode(iow io.Writer, r *MTnode) {
 
 	timeFmt := ".000000000"
 	tm := r.LatestModTime()
-	fmt.Fprintf(iow, "%s %d%s\n", "MT:", tm.Unix(), tm.Format(timeFmt))
+	if tm.Nanosecond() == 0 {
+		fmt.Fprintf(iow, "%s %d\n", "MT:", tm.Unix())
+	} else {
+		fmt.Fprintf(iow, "%s %d%s\n", "MT:", tm.Unix(), tm.Format(timeFmt))
+	}
 }
 
 func storeWriteDir(iow io.Writer, r *MTnode) {
@@ -99,7 +103,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 	for scanner.Scan() {
 		txt := scanner.Text()
 		switch {
-		case strings.HasPrefix(txt, "P: "):
+		case strings.HasPrefix(txt, "P: "): // Path
 			tsp := txt[3:]
 			tsps := strings.SplitN(tsp, " ", 3)
 			if len(tsps) != 3 {
@@ -143,7 +147,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 			name := path.Base(wpath)
 			cur = newRes(ppent, name, mode)
 
-		case strings.HasPrefix(txt, "MT: "):
+		case strings.HasPrefix(txt, "MT: "): // Modified Time
 			modtimeLine := txt[4:]
 			sns := strings.SplitN(modtimeLine, ".", 2)
 			secs, err := atoi(sns[0])
@@ -162,7 +166,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 			nsecs += secs * 1000000000
 			cur.mtimeNsecs = nsecs
 
-		case strings.HasPrefix(txt, "S: "):
+		case strings.HasPrefix(txt, "S: "): // Size
 			sizeStr := txt[3:]
 			size, err := atoi(sizeStr)
 			if err != nil {
@@ -171,7 +175,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 			}
 			cur.size = size
 
-		case strings.HasPrefix(txt, "C-"):
+		case strings.HasPrefix(txt, "C-"): // Checksums
 			ckd := txt[2:]
 			ckds := strings.SplitN(ckd, ": ", 2)
 			if len(ckds) != 2 {
@@ -190,6 +194,17 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 			csum := Checksum{Kind: chkKind, Data: chkData}
 			cur.csums = append(cur.csums, csum)
+
+			// case strings.HasPrefix(txt, "AT: "): // access time
+			// case strings.HasPrefix(txt, "CT: "): // ctime
+			// case strings.HasPrefix(txt, "MO: "): /// Mode
+			// case strings.HasPrefix(txt, "Num: "):
+			// case strings.HasPrefix(txt, "U: "): // Uid
+			// case strings.HasPrefix(txt, "G: "): // Gid
+			// case strings.HasPrefix(txt, "D: "): // Device
+			// case strings.HasPrefix(txt, "I: "): // Inode
+			// case strings.HasPrefix(txt, "L: "): // Links (number of)
+			// default: warn?
 		}
 	}
 

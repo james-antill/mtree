@@ -22,31 +22,24 @@ func iterMT(r *MTnode) <-chan *MTnode {
 }
 
 func cmpChksumEq(r1, r2 *MTnode) bool {
-	// FIXME: False positives
 	dbg := false
 
-	if len(r1.csums) != len(r2.csums) {
-		if dbg {
-			fmt.Println("JDBG:", "len", r1.name, len(r1.csums), len(r2.csums))
-			for i, k := range r1.csums {
-				fmt.Println("JDBG:", "len r1:", i, k.Kind)
-			}
-			for i, k := range r2.csums {
-				fmt.Println("JDBG:", "len r2:", i, k.Kind)
-			}
-		}
-		return false
-	}
+	matched := false
+	c1s := r1.csums[:]
+	c2s := r2.csums[:]
+	for len(c1s) > 0 && len(c2s) > 0 {
+		c1 := c1s[0]
+		c2 := c2s[0]
 
-	for i := range r1.csums {
-		c1 := r1.csums[i]
-		c2 := r2.csums[i]
 		if c1.Kind != c2.Kind {
-			if dbg {
-				fmt.Println("JDBG:", "kind", r1.name, c1.Kind, c2.Kind)
+			if c1.Kind < c2.Kind {
+				c1s = c1s[1:]
+			} else {
+				c2s = c2s[1:]
 			}
-			return false
+			continue
 		}
+
 		if !bytes.Equal(c1.Data, c2.Data) {
 			if dbg {
 				fmt.Println("JDBG:", "data", r1.name, c1.Kind,
@@ -54,44 +47,56 @@ func cmpChksumEq(r1, r2 *MTnode) bool {
 			}
 			return false
 		}
+		matched = true // At least one checksum matched
+		c1s = c1s[1:]
+		c2s = c2s[1:]
 	}
 
-	return true
+	return matched
 }
 
 func prntDiff(r1, r2 *MTnode, tree, ui bool) {
-	r1s := iterMT(r1)
-	r2s := iterMT(r2)
 
-	i1, ok1 := <-r1s
-	i2, ok2 := <-r2s
-	for ok1 && ok2 {
+	if cmpChksumEq(r1, r2) {
+		prntListMtree(r1, tree, ui, " ")
+	} else {
+		prntListMtree(r1, tree, ui, "!")
+	}
+
+	r1s := r1.Children()
+	r2s := r2.Children()
+
+	for len(r1s) > 0 && len(r2s) > 0 {
+		i1 := r1s[0]
+		i2 := r2s[0]
+
 		if i1.name != i2.name {
 			if fcmp(i1.name, i2.name) < 0 {
 				prntListMtree(i1, tree, ui, "-")
-				i1, ok1 = <-r1s
+				r1s = r1s[1:]
 			} else {
 				prntListMtree(i2, tree, ui, "+")
-				i2, ok2 = <-r2s
+				r2s = r2s[1:]
 			}
 			continue
 		}
 
 		if cmpChksumEq(i1, i2) {
 			prntListMtree(i1, tree, ui, " ")
-
+		} else if i1.IsDir() && i2.IsDir() {
+			prntDiff(i1, i2, tree, ui)
 		} else {
 			prntListMtree(i2, tree, ui, "!")
 		}
 
-		i1, ok1 = <-r1s
-		i2, ok2 = <-r2s
+		r1s = r1s[1:]
+		r2s = r2s[1:]
 	}
 
-	for i1 := range r1s {
+	for _, i1 := range r1s {
 		prntListMtree(i1, tree, ui, "-")
 	}
-	for i2 := range r2s {
+	for _, i2 := range r2s {
 		prntListMtree(i2, tree, ui, "+")
 	}
 }
