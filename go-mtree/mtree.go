@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/james-antill/mpb"
 	"github.com/james-antill/mpb/decor"
+	roc "github.com/james-antill/rename-on-close"
 
 	"golang.org/x/crypto/ssh/terminal"
 
@@ -104,8 +106,8 @@ func fcmp(a, b string) int {
 
 	return len(a) - len(b)
 }
-func fcmpLess(a, b string) bool {
-	if fcmp(a, b) < 0 {
+func fcmpLessEq(a, b string) bool {
+	if fcmp(a, b) <= 0 {
 		return true
 	}
 	return false
@@ -116,7 +118,7 @@ func (r *MTnode) Children() []*MTnode {
 	if !r.sorted {
 		children := r.ChildrenUnsorted()
 		sort.Slice(children, func(i, j int) bool {
-			return fcmpLess(children[i].name, children[j].name)
+			return fcmpLessEq(children[i].name, children[j].name)
 		})
 		r.sorted = true
 	}
@@ -489,7 +491,7 @@ func lookupDirRes(d *MTnode, n string) *MTnode {
 	// Now be clever...
 	ents := d.Children()
 	i := sort.Search(len(ents), func(i int) bool {
-		return fcmpLess(n, ents[i].name)
+		return fcmpLessEq(n, ents[i].name)
 	})
 	if i < len(ents) && ents[i].name == n {
 		return ents[i]
@@ -553,6 +555,17 @@ func ensureParentDir(root *MTnode,
 	pents := pathSplit(p)
 	ppents := pents[:len(pents)-1]
 	return ensureDirEnts(root, ppents), d
+}
+
+func mtreeChdir(node *MTnode, path string) (*MTnode, error) {
+	// pents := pathSplit(path)
+	pents := strings.Split(path, "/")
+
+	d, num := lookupRes(node, pents)
+	if len(pents) == num {
+		return d, nil
+	}
+	return nil, fmt.Errorf("Path not found: %s", path)
 }
 
 // FIXME: Needs to config. this...
@@ -1162,6 +1175,16 @@ func parseCmd(cmd string) cmdType {
 	}
 }
 
+func mkpathMust(r, p string) {
+	dir := r + "/" + p
+	if err := os.Mkdir(dir, 0770); err != nil {
+		if fi, serr := os.Stat(dir); serr == nil && fi.IsDir() {
+			return
+		}
+		fmt.Fprintf(os.Stderr, "Failed to create %s: %v\n", p, err)
+	}
+}
+
 func main() {
 	var flagHelp bool
 	helpUsage := "show help"
@@ -1246,12 +1269,12 @@ func main() {
 
 	switch cmdID {
 	case cmdConfig:
-		if flagHelp || len(flag.Args()) < 1 {
+		if flagHelp || flag.NArg() < 1 {
 			fullUsageCmdConfig(usageExitCode)
 		}
 
 	case cmdEqual:
-		if flagHelp || len(flag.Args()) < 3 {
+		if flagHelp || flag.NArg() < 3 {
 			fullUsageCmdEqual(usageExitCode)
 		}
 
@@ -1283,17 +1306,17 @@ func main() {
 		calcChecksumsDone()
 
 	case cmdDifference:
-		if flagHelp || len(flag.Args()) != 3 {
+		if flagHelp || flag.NArg() < 2 || flag.NArg() > 3 {
 			fullUsageCmdConfig(usageExitCode)
 		}
 
 	default:
-		if flagHelp || len(flag.Args()) != 2 {
+		if flagHelp || flag.NArg() != 2 {
 			fullUsageCmdDef(usageExitCode)
 		}
 	}
 
-	// Create an mtree
+	// Create an mtree, or two
 	var mtree *MTnode
 	var omtree *MTnode
 	switch cmdID {
@@ -1316,7 +1339,6 @@ func main() {
 		mtree = m
 
 	case cmdFile:
-		// FIXME: Need to set calcChecksumKinds
 		m, err := MtreeFile(flag.Arg(1), flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1335,6 +1357,50 @@ func main() {
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
+		}
+
+		if flag.NArg() == 2 {
+			dmt, off := findDotMtree(flag.Arg(1))
+			if dmt == "" {
+				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
+				os.Exit(1)
+			}
+
+			// Find the latest snapshot file...
+			mh, err := MtreeFile(dmt+"/HEAD", flagProgress)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "Can't load .mtree/HEAD from:", dmt,
+					"\n ", err)
+				os.Exit(2)
+			}
+			mh, _ = mtreeChdir(mh, "local")
+			mh.parent = nil /// Kind of hacky atm. ... for Path()
+			var mhl *MTnode
+			for _, n := range mh.Children() {
+				if strings.HasSuffix(n.Name(), ".mtree") {
+					mhl = n
+					break
+				}
+			}
+			if mhl == nil {
+				fmt.Fprintln(os.Stderr, "Can't load .mtree/HEAD from:", dmt)
+				os.Exit(1)
+			}
+			m2, err := MtreeFile(dmt+"/"+mhl.Path(), flagProgress)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(2)
+			}
+			omtree = m2
+			mtree = m1
+			if off != "" {
+				omtree, err = mtreeChdir(omtree, off)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "Can't find old off:", off)
+					os.Exit(1)
+				}
+			}
+			break
 		}
 		omtree = m1
 
@@ -1433,22 +1499,81 @@ func main() {
 		}
 
 	case cmdSnapshot:
-		p := mtree.parent
 		mtree.parent = nil
-		storeWriteFile(os.Stdout, mtree)
-		mtree.parent = p
+
+		// FIXME: off needs to be respected in snapshot
+		dmt, _ := findDotMtree(flag.Arg(1))
+		if dmt == "" {
+			fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
+			os.Exit(1)
+		}
+		fn := tmSnapName(time.Now())
+		nfn := dmt + "/local/" + fn
+		fo, err := roc.Create(nfn)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "snap:", err)
+			os.Exit(1)
+		}
+		defer fo.Close()
+
+		iow := bufio.NewWriter(fo)
+		storeWriteFile(iow, mtree)
+		if err := iow.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "Can't write snap:", err)
+			os.Exit(1)
+		}
+		if err := fo.CloseRename(); err != nil {
+			fmt.Fprintln(os.Stderr, "Can't write snap:", err)
+			os.Exit(1)
+		}
+
+		// Now we write the mtree of the latest mtree ... :-o
+		rootx2 := rootRes()
+		mtreex2l := ensureDir(rootx2, path.Dir(nfn))
+		mtreex2 := mtreex2l.parent
+		mtreex2ll := newRes(mtreex2l, fn, 0)
+
+		if fi, err := os.Lstat(nfn); err == nil {
+			mtreex2ll.mtimeNsecs = fi.ModTime().UnixNano()
+		}
+
+		checksumFile(mtreex2ll, "")
+		mtreex2.parent = nil
+
+		fox2, err := roc.Create(dmt + "/HEAD")
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "snap:", err)
+			os.Exit(1)
+		}
+		defer fo.Close()
+
+		iow = bufio.NewWriter(fox2)
+
+		storeWriteFile(iow, mtreex2ll)
+		if err := iow.Flush(); err != nil {
+			fmt.Fprintln(os.Stderr, "Can't write HEAD:", err)
+			os.Exit(1)
+		}
+		if err := fox2.CloseRename(); err != nil {
+			fmt.Fprintln(os.Stderr, "Can't write HEAD:", err)
+			os.Exit(1)
+		}
 
 	case cmdInitialize:
-		// FIXME: mkdir(.mtree)
+		mkpathMust(flag.Arg(1), ".mtree")
+		mkpathMust(flag.Arg(1), ".mtree/local")
+		mkpathMust(flag.Arg(1), ".mtree/remote")
+		mkpathMust(flag.Arg(1), ".mtree/cache")
+		// FIXME: Dump config to .mtree/config
+
 	case cmdDifference:
+		// Make sure the dir. checksums are valid.
 		for _, csum := range calcChecksumKinds {
 			mtree.Checksum(csum)
 		}
 
-		p := mtree.parent
 		mtree.parent = nil
 		prntDiff(omtree, mtree, false, flagUI)
-		mtree.parent = p
 
 	default:
 		usageCmdDef()

@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func storeWriteNode(iow io.Writer, r *MTnode) {
@@ -230,4 +231,9 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 	return root, nil
 
+}
+
+func tmSnapName(tm time.Time) string {
+	// In old speak: "%Y-%m-%d--%H%MZ
+	return tm.Format("2006-01-02--1504Z") + ".mtree"
 }

@@ -32,6 +32,9 @@ func cmpChksumEq(r1, r2 *MTnode) bool {
 		c2 := c2s[0]
 
 		if c1.Kind != c2.Kind {
+			if dbg {
+				fmt.Println("JDBG:", "skip", c1.Kind, c2.Kind)
+			}
 			if c1.Kind < c2.Kind {
 				c1s = c1s[1:]
 			} else {
@@ -46,6 +49,9 @@ func cmpChksumEq(r1, r2 *MTnode) bool {
 					b2s(r1.Checksum(c1.Kind)), b2s(r2.Checksum(c1.Kind)))
 			}
 			return false
+		}
+		if dbg {
+			fmt.Println("JDBG:", "match", c1.Kind, c2.Kind)
 		}
 		matched = true // At least one checksum matched
 		c1s = c1s[1:]
