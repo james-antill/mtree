@@ -632,7 +632,7 @@ func normPath(root string) (string, error) {
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
 func walkFiles(wroot string, qlen int,
-	needCachingData, filter, progress bool) (<-chan *MTnode, int64, <-chan error) {
+	filter bool) (<-chan *MTnode, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
 	errc := make(chan error, 1)
@@ -690,13 +690,6 @@ func walkFiles(wroot string, qlen int,
 				ppent, pparent = ensureParentDir(root, p, pparent, ppent)
 				res := newRes(ppent, name, mode.ModeType())
 
-				if needCachingData {
-					if fi, err := os.Lstat(p); err == nil {
-						res.mtimeNsecs = fi.ModTime().UnixNano()
-					}
-					// FIXME: If it's wanted, fill in uid/etc.
-				}
-
 				nodes <- res
 				//				select {
 				//				case nodes <- res:
@@ -720,26 +713,131 @@ func walkFiles(wroot string, qlen int,
 		nodes <- root
 	}()
 
-	// NOTE: This is sometimes faster and sometimes slower??
-	if progress {
-		nnodes := make(chan *MTnode, qlen)
-		lennodes := make(chan int64)
+	return nodes, errc
+}
 
-		go func() {
-			h := []*MTnode{}
-			for n := range nodes {
-				h = append(h, n)
-			}
-			lennodes <- int64(len(h))
-			for _, n := range h {
-				nnodes <- n
-			}
-			close(nnodes)
-		}()
+// statNodes gets each node and stat()s to get the mtime, keeps order the same.
+func statNodes(nodes <-chan *MTnode, qlen int) <-chan *MTnode {
+	statNodes := make(chan *MTnode, qlen)
 
-		return nnodes, <-lennodes, errc
+	go func() {
+		for res := range nodes {
+			p := res.Path()
+			if fi, err := os.Lstat(p); err == nil {
+				res.mtimeNsecs = fi.ModTime().UnixNano()
+				res.size = fi.Size() // Note that this is filled in by digest
+			}
+			// FIXME: If it's wanted, fill in uid/etc.
+
+			statNodes <- res
+		}
+
+		close(statNodes)
+	}()
+
+	return statNodes
+}
+
+func chksumKindSubset(r1 []string, r2 []Checksum) bool {
+	for len(r1) > 0 && len(r2) > 0 {
+		if r1[0] == r2[0].Kind {
+			r1 = r1[1:]
+		}
+		r2 = r2[1:]
 	}
-	return nodes, 0, errc
+
+	if len(r1) > 0 {
+		return false
+	}
+
+	return true
+}
+
+// Still working on this...
+const dbgCache = false
+
+// maybeMigrate tries to migrate the data from the cache to the node.
+func maybeMigrate(cache, res *MTnode, trimPrefix string) {
+	if res.IsDir() {
+		return
+	}
+
+	fp := res.Path()
+
+	p := strings.TrimPrefix(fp, trimPrefix)
+
+	oldRes, err := mtreeChdir(cache, p)
+	if err != nil {
+		if dbgCache {
+			fmt.Println("JDBG:", "!migrate", "path", fp, trimPrefix)
+		}
+		return
+	}
+
+	if oldRes.mtimeNsecs != res.mtimeNsecs {
+		if dbgCache {
+			fmt.Println("JDBG:", "!migrate", "mtime", p)
+		}
+		return
+	}
+	if oldRes.size != res.size {
+		if dbgCache {
+			fmt.Println("JDBG:", "!migrate", "size", p)
+		}
+		return
+	}
+
+	if !chksumKindSubset(calcChecksumKinds, oldRes.csums) {
+		if dbgCache {
+			fmt.Println("JDBG:", "!migrate", "hash", p)
+		}
+		return
+	}
+	if dbgCache {
+		fmt.Println("JDBG:", "migrate", p)
+	}
+	res.csums = oldRes.csums
+}
+
+// cacheNodes reads the cache information for each node, keeps order the same.
+func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
+	trimPrefix string) <-chan *MTnode {
+	cacheNodes := make(chan *MTnode, qlen)
+
+	go func() {
+		for res := range nodes {
+			maybeMigrate(cache, res, trimPrefix)
+			cacheNodes <- res
+		}
+
+		close(cacheNodes)
+	}()
+
+	return cacheNodes
+}
+
+// progressLenNodes gets all the nodes to get the total number, keeps order the same.
+// NOTE: This is sometimes faster and sometimes slower??
+func progressLenNodes(nodes <-chan *MTnode, qlen int) (<-chan *MTnode, int64) {
+	lenNodes := make(chan *MTnode, qlen)
+	lenChan := make(chan int64)
+
+	go func() {
+		h := []*MTnode{}
+		for n := range nodes {
+			h = append(h, n)
+		}
+
+		lenChan <- int64(len(h))
+		close(lenChan)
+
+		for _, n := range h {
+			lenNodes <- n
+		}
+		close(lenNodes)
+	}()
+
+	return lenNodes, <-lenChan
 }
 
 // digest gets data for files/symlinks and creates the checksum data for them.
@@ -789,8 +887,19 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 		return nil, err
 	}
 
-	nodes, nnodes, errc := walkFiles(root, numDigesters,
-		needCachingData, filter, progress)
+	nodes, errc := walkFiles(root, numDigesters, filter)
+
+	var nnodes int64
+	if progress {
+		nodes, nnodes = progressLenNodes(nodes, numDigesters)
+	}
+
+	if cache, trimPrefix := maybeLatestSnapshot(root, progress); cache != nil {
+		nodes = statNodes(nodes, numDigesters)
+		nodes = cacheNodes(nodes, numDigesters, cache, trimPrefix)
+	} else if needCachingData {
+		nodes = statNodes(nodes, numDigesters)
+	}
 
 	done := make(chan *MTnode)
 
@@ -1185,6 +1294,26 @@ func mkpathMust(r, p string) {
 	}
 }
 
+func maybeLatestSnapshot(path string, flagProgress bool) (*MTnode, string) {
+	dmt, off := findDotMtree(path)
+	if dmt == "" {
+		return nil, ""
+	}
+	omtree, err := latestSnapshot(dmt, flagProgress)
+	if err != nil {
+		return nil, ""
+	}
+	if off != "" {
+		omtree, err = mtreeChdir(omtree, off)
+		if err != nil {
+			return nil, ""
+		}
+		// FIXME: if off is a file?
+		return omtree, path + "/"
+	}
+	return omtree, path + "/"
+}
+
 func main() {
 	var flagHelp bool
 	helpUsage := "show help"
@@ -1320,13 +1449,14 @@ func main() {
 	var mtree *MTnode
 	var omtree *MTnode
 	switch cmdID {
+	case cmdSnapshot:
+		cachingData = true
+		fallthrough
 	case cmdList:
 		fallthrough
 	case cmdTree:
 		fallthrough
 	case cmdInfo:
-		fallthrough
-	case cmdSnapshot:
 		fallthrough
 	case cmdSummary:
 		fallthrough
@@ -1365,33 +1495,11 @@ func main() {
 				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
 				os.Exit(1)
 			}
-
-			// Find the latest snapshot file...
-			mh, err := MtreeFile(dmt+"/HEAD", flagProgress)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "Can't load .mtree/HEAD from:", dmt,
-					"\n ", err)
-				os.Exit(2)
-			}
-			mh, _ = mtreeChdir(mh, "local")
-			mh.parent = nil /// Kind of hacky atm. ... for Path()
-			var mhl *MTnode
-			for _, n := range mh.Children() {
-				if strings.HasSuffix(n.Name(), ".mtree") {
-					mhl = n
-					break
-				}
-			}
-			if mhl == nil {
-				fmt.Fprintln(os.Stderr, "Can't load .mtree/HEAD from:", dmt)
-				os.Exit(1)
-			}
-			m2, err := MtreeFile(dmt+"/"+mhl.Path(), flagProgress)
+			omtree, err = latestSnapshot(dmt, flagProgress)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, err)
-				os.Exit(2)
+				os.Exit(1)
 			}
-			omtree = m2
 			mtree = m1
 			if off != "" {
 				omtree, err = mtreeChdir(omtree, off)

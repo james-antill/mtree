@@ -237,3 +237,45 @@ func tmSnapName(tm time.Time) string {
 	// In old speak: "%Y-%m-%d--%H%MZ
 	return tm.Format("2006-01-02--1504Z") + ".mtree"
 }
+
+func hasSuffixMtree(name string) bool {
+	switch {
+	case strings.HasSuffix(name, ".mtree.bz2"):
+		fallthrough
+	case strings.HasSuffix(name, ".mtree.gz"):
+		fallthrough
+	case strings.HasSuffix(name, ".mtree.xz"):
+		fallthrough
+	case strings.HasSuffix(name, ".mtree"):
+		return true
+	}
+	return false
+}
+
+func latestSnapshot(dmt string, flagProgress bool) (*MTnode, error) {
+	// Find the latest snapshot file from a given .mtree dir...
+	mh, err := MtreeFile(dmt+"/HEAD", flagProgress)
+	if err != nil {
+		// FIXME: Error.Wrap
+		return nil, fmt.Errorf("Can't load .mtree/HEAD from: %s (%v)", dmt, err)
+	}
+	mh, _ = mtreeChdir(mh, "local")
+	mh.parent = nil // Kind of hacky atm. ... for Path()
+	var mhl *MTnode
+
+	for _, n := range mh.Children() {
+		if hasSuffixMtree(n.Name()) {
+			mhl = n
+			break
+		}
+	}
+	if mhl == nil {
+		return nil, fmt.Errorf("Can't load .mtree/HEAD from: %s", dmt)
+	}
+	m2, err := MtreeFile(dmt+"/"+mhl.Path(), flagProgress)
+	if err != nil {
+		return nil, err
+	}
+
+	return m2, nil
+}
