@@ -116,9 +116,8 @@ func fcmpLessEq(a, b string) bool {
 // Children gives you the sorted children of this node.
 func (r *MTnode) Children() []*MTnode {
 	if !r.sorted {
-		children := r.ChildrenUnsorted()
-		sort.Slice(children, func(i, j int) bool {
-			return fcmpLessEq(children[i].name, children[j].name)
+		sort.Slice(r.children, func(i, j int) bool {
+			return fcmpLessEq(r.children[i].name, r.children[j].name)
 		})
 		r.sorted = true
 	}
@@ -126,11 +125,37 @@ func (r *MTnode) Children() []*MTnode {
 	return r.children
 }
 
-// add a child to a parent
-func (r *MTnode) add(c *MTnode) {
-	r.children = append(r.children, c)
+// Reset the checksums of the node, and all parents
+func (r *MTnode) Reset() {
 	r.sorted = false
 	r.csums = nil
+	if r.parent != nil {
+		r.parent.Reset()
+	}
+}
+
+// Add a child to a parent
+func (r *MTnode) Add(c *MTnode) {
+	r.children = append(r.children, c)
+	if r.sorted {
+		r.Reset()
+	}
+}
+
+// Replace a Child a parent
+func (r *MTnode) Replace(c *MTnode) bool {
+	ents := r.Children()
+	i := sort.Search(len(ents), func(i int) bool {
+		return fcmpLessEq(c.name, ents[i].name)
+	})
+	if i < len(ents) && ents[i].name == c.name {
+		ents[i] = c
+		r.Reset()
+		return true
+	}
+
+	r.Add(c)
+	return false
 }
 
 // calcChecksumKinds is the checksums we want to calculate on the data.
@@ -467,7 +492,7 @@ func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
 	}
 	if dres != nil {
 		res.fsActive = dres.fsActive
-		dres.add(res)
+		dres.Add(res)
 	}
 	//	fmt.Println("nres:", res.path())
 	return res
@@ -924,14 +949,16 @@ func first(r *MTnode) *MTnode {
 	return first(r.children[0])
 }
 
-// MtreePath Generate data from FS for root path
-func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, error) {
+// MtreePath Generate data from FS for root path. Also returns last snapshot,
+// if available.
+func MtreePath(root string, needCachingData, filter,
+	progress bool) (*MTnode, *MTnode, error) {
 
 	numDigesters := numCPUDigesters()
 
 	root, err := normPath(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rootNode, nodes, errc := walkFiles(root, numDigesters, filter)
@@ -941,9 +968,11 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 		nodes, numNodes = progressLenNodes(nodes, numDigesters)
 	}
 
+	var oret *MTnode
 	if cache, trimPrefix := maybeLatestSnapshot(root, progress); cache != nil {
 		nodes = statNodes(nodes, numDigesters)
 		nodes = cacheNodes(nodes, numDigesters, cache, trimPrefix)
+		oret = cache
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
 	}
@@ -962,28 +991,30 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 
 	// Check whether the Walk failed.
 	if err := <-errc; err != nil { // HLerrc
-		return nil, err
+		return nil, nil, err
 	}
 
 	// Walk to the starting point:
 	ret := ensureDir(rootNode, root)
 	//	ret = first(ret) // Skip the usuless root nodes
 
-	return ret, nil
+	return ret, oret, nil
 }
 
 // MtreePathOrFile Generate data from FS for root path, or from an mtree file
-func MtreePathOrFile(root string, needCachingData, filter, progress bool) (*MTnode, error) {
+func MtreePathOrFile(root string, needCachingData, filter,
+	progress bool) (*MTnode, *MTnode, error) {
 
 	fi, err := os.Stat(root)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if fi.IsDir() {
 		return MtreePath(root, needCachingData, filter, progress)
 	}
 
-	return MtreeFile(root, progress)
+	m, e := MtreeFile(root, progress)
+	return m, nil, e
 }
 
 // UI names for KiloBytes etc.
@@ -1485,12 +1516,13 @@ func main() {
 	case cmdSummary:
 		fallthrough
 	case cmdEqual:
-		m, err := MtreePath(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		m, o, err := MtreePath(flag.Arg(1), cachingData, flagFilter, flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		mtree = m
+		omtree = o
 
 	case cmdFile:
 		m, err := MtreeFile(flag.Arg(1), flagProgress)
@@ -1507,36 +1539,43 @@ func main() {
 		// diff x = current x vs. last snap
 		// diff dirx filey / filex diry = load snap from file and diff.
 
-		m1, err := MtreePathOrFile(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		m1, m2, err := MtreePathOrFile(flag.Arg(1),
+			cachingData, flagFilter, flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 
 		if flag.NArg() == 2 {
+			mtree = m1
 			dmt, off := findDotMtree(flag.Arg(1))
 			if dmt == "" {
 				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
 				os.Exit(1)
 			}
-			omtree, err = latestSnapshot(dmt, flagProgress)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			mtree = m1
-			if off != "" {
-				omtree, err = mtreeChdir(omtree, off)
+			omtree = m2
+			if m2 == nil { // This should fail, or we'd get it from the cache
+				omtree, err = latestSnapshot(dmt, flagProgress)
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Can't find old off:", off)
+					fmt.Fprintln(os.Stderr, "Can't load .mtree from:",
+						flag.Arg(1), err)
 					os.Exit(1)
+				}
+				if off != "" {
+					m2, err = mtreeChdir(omtree, off)
+					if err != nil {
+						fmt.Fprintln(os.Stderr, "Can't find old off:",
+							"from:", omtree.Path(), err)
+						os.Exit(1)
+					}
 				}
 			}
 			break
 		}
 		omtree = m1
 
-		m2, err := MtreePathOrFile(flag.Arg(2), cachingData, flagFilter, flagProgress)
+		m2, _, err = MtreePathOrFile(flag.Arg(2),
+			cachingData, flagFilter, flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -1631,14 +1670,34 @@ func main() {
 		}
 
 	case cmdSnapshot:
-		mtree.parent = nil
-
-		// FIXME: off needs to be respected in snapshot
-		dmt, _ := findDotMtree(flag.Arg(1))
+		dmt, off := findDotMtree(flag.Arg(1))
 		if dmt == "" {
 			fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
 			os.Exit(1)
 		}
+		if off != "" {
+			// Need to merge the new snapshot data into the old snapshot
+			if omtree == nil {
+				// Simple case, just puts some parents in there...
+				parents := len(strings.Split(off, "/"))
+				for i := 0; i < parents; i++ {
+					if mtree.parent == nil || len(mtree.parent.children) > 0 {
+						panic("Bad subset snapshot")
+					}
+					mtree = mtree.parent
+				}
+			} else {
+				omtree = omtree.parent
+				omtree.Replace(mtree)
+
+				for mtree = omtree; mtree.parent != nil; mtree = mtree.parent {
+					// Going to the root of the snapshot ...
+				}
+			}
+		}
+
+		mtree.parent = nil
+
 		fn := tmSnapName(time.Now())
 		nfn := dmt + "/local/" + fn
 		fo, err := roc.Create(nfn)

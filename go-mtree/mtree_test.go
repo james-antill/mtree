@@ -160,7 +160,7 @@ func TestFS(t *testing.T) {
 		filt := data[i].filt
 		res := data[i].res
 
-		root, err := MtreePath(path, false, filt, false)
+		root, _, err := MtreePath(path, false, filt, false)
 		if err != nil {
 			t.Errorf("MtreePath(%s): %v\n", path, err)
 			return
