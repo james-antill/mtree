@@ -632,10 +632,14 @@ func normPath(root string) (string, error) {
 // walk on the error channel.  If done is closed, walkFiles abandons its work.
 // qlen sets the buffer on the nodes channel.
 func walkFiles(wroot string, qlen int,
-	filter bool) (<-chan *MTnode, <-chan error) {
+	filter bool) (*MTnode, <-chan *MTnode, <-chan error) {
 
 	nodes := make(chan *MTnode, qlen)
 	errc := make(chan error, 1)
+
+	root := rootRes()
+	root.fsActive = true
+
 	go func() {
 		// Close the channel after Walk returns.
 		defer close(nodes)
@@ -645,9 +649,6 @@ func walkFiles(wroot string, qlen int,
 			errc <- err
 			return
 		}
-
-		root := rootRes()
-		root.fsActive = true
 
 		if !rootFI.IsDir() {
 			ppent, _ := ensureParentDir(root, wroot, "", root)
@@ -710,28 +711,39 @@ func walkFiles(wroot string, qlen int,
 			//				res.dirDone()
 			//			},
 		})
-		nodes <- root
 	}()
 
-	return nodes, errc
+	return root, nodes, errc
+}
+
+func statNode(res *MTnode) {
+	p := res.Path()
+	if fi, err := os.Lstat(p); err == nil {
+		res.mtimeNsecs = fi.ModTime().UnixNano()
+		res.size = fi.Size() // Note that this is filled in by digest
+	}
+	// FIXME: If it's wanted, fill in uid/etc.
 }
 
 // statNodes gets each node and stat()s to get the mtime, keeps order the same.
 func statNodes(nodes <-chan *MTnode, qlen int) <-chan *MTnode {
 	statNodes := make(chan *MTnode, qlen)
 
-	go func() {
-		for res := range nodes {
-			p := res.Path()
-			if fi, err := os.Lstat(p); err == nil {
-				res.mtimeNsecs = fi.ModTime().UnixNano()
-				res.size = fi.Size() // Note that this is filled in by digest
+	var wg sync.WaitGroup
+	wg.Add(qlen)
+
+	for i := 0; i < qlen; i++ {
+		go func() {
+			for res := range nodes {
+				statNode(res)
+				statNodes <- res
 			}
-			// FIXME: If it's wanted, fill in uid/etc.
+			wg.Done()
+		}()
+	}
 
-			statNodes <- res
-		}
-
+	go func() {
+		wg.Wait()
 		close(statNodes)
 	}()
 
@@ -804,12 +816,21 @@ func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
 	trimPrefix string) <-chan *MTnode {
 	cacheNodes := make(chan *MTnode, qlen)
 
-	go func() {
-		for res := range nodes {
-			maybeMigrate(cache, res, trimPrefix)
-			cacheNodes <- res
-		}
+	var wg sync.WaitGroup
+	wg.Add(qlen)
 
+	for i := 0; i < qlen; i++ {
+		go func() {
+			for res := range nodes {
+				maybeMigrate(cache, res, trimPrefix)
+				cacheNodes <- res
+			}
+			wg.Done()
+		}()
+	}
+
+	go func() {
+		wg.Wait()
 		close(cacheNodes)
 	}()
 
@@ -855,12 +876,38 @@ func digest(res *MTnode, dbar *mpb.Bar) {
 	}
 }
 
-// digestWorker walks a work queue and calls digest()
-func digestWorker(done chan<- *MTnode, paths <-chan *MTnode, dbar *mpb.Bar) {
-	for res := range paths {
-		digest(res, dbar)
-		done <- res
+func digestNodes(nodes <-chan *MTnode, qlen int, numNodes int64,
+	progress string) <-chan *MTnode {
+	digestNodes := make(chan *MTnode, qlen)
+
+	var wg sync.WaitGroup
+	wg.Add(qlen)
+
+	var p *mpb.Progress
+	var dbar *mpb.Bar
+	if progress != "" {
+		p = mpb.New(mpb.WithWaitGroup(&wg))
+		dbar = p.AddBarDef(numNodes, progress, decor.Unit_k)
 	}
+
+	for i := 0; i < qlen; i++ {
+		go func() {
+			for res := range nodes {
+				digest(res, dbar)
+				digestNodes <- res
+			}
+			wg.Done()
+		}()
+	}
+	go func() {
+		wg.Wait()
+		if p != nil {
+			p.Stop()
+		}
+		close(digestNodes)
+	}()
+
+	return digestNodes
 }
 
 func first(r *MTnode) *MTnode {
@@ -887,11 +934,11 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 		return nil, err
 	}
 
-	nodes, errc := walkFiles(root, numDigesters, filter)
+	rootNode, nodes, errc := walkFiles(root, numDigesters, filter)
 
-	var nnodes int64
+	var numNodes int64
 	if progress {
-		nodes, nnodes = progressLenNodes(nodes, numDigesters)
+		nodes, numNodes = progressLenNodes(nodes, numDigesters)
 	}
 
 	if cache, trimPrefix := maybeLatestSnapshot(root, progress); cache != nil {
@@ -901,38 +948,15 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 		nodes = statNodes(nodes, numDigesters)
 	}
 
-	done := make(chan *MTnode)
-
-	var wg sync.WaitGroup
-
-	var p *mpb.Progress
-	var dbar *mpb.Bar
+	progText := ""
 	if progress {
-		p = mpb.New(mpb.WithWaitGroup(&wg))
-		dbar = p.AddBarDef(nnodes, "Digest: ", decor.Unit_k)
+		progText = path.Base(root) + " (files): "
 	}
-	wg.Add(numDigesters)
-	for i := 0; i < numDigesters; i++ {
-		go func() {
-			digestWorker(done, nodes, dbar)
-			wg.Done()
-		}()
-	}
-	go func() {
-		wg.Wait()
-		if p != nil {
-			p.Stop()
-		}
-		close(done)
-	}()
+	nodes = digestNodes(nodes, numDigesters, numNodes, progText)
 
-	var ret *MTnode
-	for r := range done {
+	for r := range nodes {
 		if r.err != nil {
 			fmt.Fprintln(os.Stderr, r.err)
-		}
-		if r.name == "/" {
-			ret = r
 		}
 	}
 
@@ -942,7 +966,7 @@ func MtreePath(root string, needCachingData, filter, progress bool) (*MTnode, er
 	}
 
 	// Walk to the starting point:
-	ret = ensureDir(ret, root)
+	ret := ensureDir(rootNode, root)
 	//	ret = first(ret) // Skip the usuless root nodes
 
 	return ret, nil
