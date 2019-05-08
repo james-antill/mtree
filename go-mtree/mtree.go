@@ -1009,7 +1009,7 @@ func MtreePathOrFile(root string, needCachingData, filter,
 	if err != nil {
 		return nil, nil, err
 	}
-	if fi.IsDir() {
+	if fi.IsDir() || !strings.Contains(root, ".mtree") {
 		return MtreePath(root, needCachingData, filter, progress)
 	}
 

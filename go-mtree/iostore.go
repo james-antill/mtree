@@ -215,10 +215,8 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 	if !hasRoot {
 		if len(root.children) != 1 {
-			panic(root)
-		}
-		if !root.children[0].IsDir() {
-			panic(root)
+			return nil, fmt.Errorf("Bad .mtree file: %s: No data found",
+				mfname)
 		}
 		root.children[0].parent = nil
 		root = root.children[0]
