@@ -62,6 +62,7 @@ type MTnode struct {
 	mtimeNsecs int64     // Only useful for !isDir
 	children   []*MTnode // Only useful for  isDir
 	err        error     // Only useful during walk
+	// data       []byte    // For non-regular files?
 
 	fsActive bool // Can we call into the FS to get checksums
 
@@ -150,11 +151,13 @@ func (r *MTnode) Replace(c *MTnode) bool {
 	})
 	if i < len(ents) && ents[i].name == c.name {
 		ents[i] = c
+		c.parent = r
 		r.Reset()
 		return true
 	}
 
 	r.Add(c)
+	c.parent = r
 	return false
 }
 
@@ -232,6 +235,7 @@ func checksumSymlink(r *MTnode, kind string) {
 		fmt.Fprintln(os.Stderr, err)
 		data = ""
 	}
+	// r.data = data
 	r.size = int64(len(data))
 
 	r.csums = nil
@@ -969,10 +973,12 @@ func MtreePath(root string, needCachingData, filter,
 	}
 
 	var oret *MTnode
-	if cache, trimPrefix := maybeLatestSnapshot(root, progress); cache != nil {
+	var dmtOff string
+	if cache, off := maybeLatestSnapshot(root, progress); cache != nil {
 		nodes = statNodes(nodes, numDigesters)
-		nodes = cacheNodes(nodes, numDigesters, cache, trimPrefix)
+		nodes = cacheNodes(nodes, numDigesters, cache, root+"/")
 		oret = cache
+		dmtOff = off
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
 	}
@@ -996,7 +1002,29 @@ func MtreePath(root string, needCachingData, filter,
 
 	// Walk to the starting point:
 	ret := ensureDir(rootNode, root)
-	//	ret = first(ret) // Skip the usuless root nodes
+
+	// Blank the full path out at either:
+	if oret == nil { // The user supplied path (nearest dir.)
+		dir := ret
+		if !dir.IsDir() {
+			dir = dir.parent
+		}
+		dir.parent = nil
+	} else { // The .mtree root
+		if dmtOff == "" {
+			ret.parent = nil
+		} else {
+			parents := len(strings.Split(dmtOff, "/"))
+			mtree := ret
+			for i := 0; i < parents; i++ {
+				if mtree.parent == nil {
+					panic("Bad subset")
+				}
+				mtree = mtree.parent
+			}
+			mtree.parent = nil
+		}
+	}
 
 	return ret, oret, nil
 }
@@ -1364,9 +1392,9 @@ func maybeLatestSnapshot(path string, flagProgress bool) (*MTnode, string) {
 			return nil, ""
 		}
 		// FIXME: if off is a file?
-		return omtree, path + "/"
 	}
-	return omtree, path + "/"
+
+	return omtree, off
 }
 
 func main() {
@@ -1585,27 +1613,15 @@ func main() {
 
 	switch cmdID {
 	case cmdList:
-		p := mtree.parent
-		mtree.parent = nil
 		prntListMtreed(mtree, false, flagUI, "")
-		mtree.parent = p
 	case cmdTree:
-		p := mtree.parent
-		mtree.parent = nil
 		prntListMtreed(mtree, true, flagUI, "")
-		mtree.parent = p
 
 	case cmdInfo:
-		p := mtree.parent
-		mtree.parent = nil
 		prntInfoMtreed(mtree, cachingData, flagUI)
-		mtree.parent = p
 
 	case cmdSummary:
-		p := mtree.parent
-		mtree.parent = nil
 		prntInfoMtree(mtree, cachingData, flagUI)
-		mtree.parent = p
 
 	case cmdEqual:
 		chkArgs := flag.Args()[2:]
@@ -1670,36 +1686,39 @@ func main() {
 		}
 
 	case cmdSnapshot:
-		dmt, off := findDotMtree(flag.Arg(1))
+		dmt, _ := findDotMtree(flag.Arg(1))
 		if dmt == "" {
 			fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
 			os.Exit(1)
 		}
-		if off != "" {
-			// Need to merge the new snapshot data into the old snapshot
-			if omtree == nil {
-				// Simple case, just puts some parents in there...
-				parents := len(strings.Split(off, "/"))
-				for i := 0; i < parents; i++ {
-					if mtree.parent == nil || len(mtree.parent.children) > 0 {
-						panic("Bad subset snapshot")
-					}
-					mtree = mtree.parent
-				}
-			} else {
-				omtree = omtree.parent
-				omtree.Replace(mtree)
 
-				for mtree = omtree; mtree.parent != nil; mtree = mtree.parent {
-					// Going to the root of the snapshot ...
-				}
+		if omtree == nil {
+			// Simple case, no old snapshot
+			for mtree.parent != nil {
+				// Going to the root of the snapshot ...
+				mtree = mtree.parent
+			}
+		} else {
+			// Need to merge the new snapshot data into the old snapshot
+			omtree = omtree.parent
+			omtree.Replace(mtree)
+
+			mtree = omtree
+			for mtree.parent != nil {
+				// Going to the root of the snapshot ...
+				mtree = mtree.parent
 			}
 		}
 
-		mtree.parent = nil
+		bfn := tmBaseName(time.Now())
+		sdfn := dmt + "/data/" + bfn
+		dtree := path.Dir(path.Dir(dmt))
+		if err := storeWriteData(sdfn, dtree, mtree); err != nil {
+			fmt.Fprintln(os.Stderr, "snap data:", err)
+			os.Exit(1)
+		}
 
-		fn := tmSnapName(time.Now())
-		nfn := dmt + "/local/" + fn
+		nfn := dmt + "/local/" + bfn + ".mtree"
 		fo, err := roc.Create(nfn)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "snap:", err)
@@ -1722,7 +1741,7 @@ func main() {
 		rootx2 := rootRes()
 		mtreex2l := ensureDir(rootx2, path.Dir(nfn))
 		mtreex2 := mtreex2l.parent
-		mtreex2ll := newRes(mtreex2l, fn, 0)
+		mtreex2ll := newRes(mtreex2l, bfn+".mtree", 0)
 
 		if fi, err := os.Lstat(nfn); err == nil {
 			mtreex2ll.mtimeNsecs = fi.ModTime().UnixNano()
@@ -1745,6 +1764,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Can't write HEAD:", err)
 			os.Exit(1)
 		}
+
+		os.Rename(dmt+"/HEAD", dmt+"/PREV") // Ignore errors
+
 		if err := fox2.CloseRename(); err != nil {
 			fmt.Fprintln(os.Stderr, "Can't write HEAD:", err)
 			os.Exit(1)
@@ -1763,7 +1785,6 @@ func main() {
 			mtree.Checksum(csum)
 		}
 
-		mtree.parent = nil
 		prntDiff(omtree, mtree, false, flagUI)
 
 	default:
