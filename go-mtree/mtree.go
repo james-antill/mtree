@@ -1692,6 +1692,17 @@ func main() {
 			os.Exit(1)
 		}
 
+		// Make sure the dir. checksums are valid.
+		for _, csum := range calcChecksumKinds {
+			mtree.Checksum(csum)
+		}
+
+		if omtree != nil && cmpChksumEq(omtree, mtree) {
+			fmt.Println("Nothing changed:")
+			prntInfoMtree(mtree, cachingData, flagUI)
+			break
+		}
+
 		if omtree == nil || omtree.parent == nil {
 			// Simple case, no old snapshot
 			for mtree.parent != nil {
@@ -1710,7 +1721,7 @@ func main() {
 			}
 		}
 
-		bfn := tmBaseName(time.Now())
+		bfn := tmBaseName(time.Now().UTC())
 		sdfn := dmt + "/data/" + bfn
 		dtree := path.Dir(path.Dir(dmt))
 		if err := storeWriteData(sdfn, dtree, mtree); err != nil {
@@ -1771,6 +1782,8 @@ func main() {
 			fmt.Fprintln(os.Stderr, "Can't write HEAD:", err)
 			os.Exit(1)
 		}
+
+		prntInfoMtree(mtree, cachingData, flagUI)
 
 	case cmdInitialize:
 		mkpathMust(flag.Arg(1), ".mtree")
