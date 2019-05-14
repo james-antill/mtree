@@ -66,7 +66,7 @@ func prntDiff(r1, r2 *MTnode, tree, ui bool) {
 	if cmpChksumEq(r1, r2) {
 		prntListMtree(r1, tree, ui, " ")
 	} else {
-		prntListMtree(r1, tree, ui, "!")
+		prntListMtree(r2, tree, ui, "!")
 	}
 
 	r1s := r1.Children()
@@ -91,6 +91,9 @@ func prntDiff(r1, r2 *MTnode, tree, ui bool) {
 			prntListMtree(i1, tree, ui, " ")
 		} else if i1.IsDir() && i2.IsDir() {
 			prntDiff(i1, i2, tree, ui)
+		} else if false {
+			prntListMtree(i1, tree, ui, "-")
+			prntListMtree(i2, tree, ui, "+")
 		} else {
 			prntListMtree(i2, tree, ui, "!")
 		}
