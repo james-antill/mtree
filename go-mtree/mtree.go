@@ -1692,7 +1692,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if omtree == nil {
+		if omtree == nil || omtree.parent == nil {
 			// Simple case, no old snapshot
 			for mtree.parent != nil {
 				// Going to the root of the snapshot ...

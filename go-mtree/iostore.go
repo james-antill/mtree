@@ -316,11 +316,10 @@ func storeWriteDataSymlink(dmt, ndmt, ndfn string, r *MTnode) error {
 	defer fo.Close()
 
 	// FIXME: Race with MtreePath() and not efficient
-	fmt.Println("JDBG:", ndmt, ndfn)
 
 	data, err := os.Readlink(ndfn)
 	if err != nil { // Ignore read errors
-		fmt.Println("JDBG:", ndfn, err)
+		fmt.Fprintln(os.Stderr, "data:", ndfn, err)
 		return nil
 	}
 
