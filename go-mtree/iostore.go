@@ -10,9 +10,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	roc "github.com/james-antill/rename-on-close"
 )
 
-func storeWriteNode(iow io.Writer, r *MTnode) {
+func storeWriteFileNode(iow io.Writer, r *MTnode) {
 	fn := r.Path()
 
 	if r.IsSymlink() {
@@ -38,10 +40,10 @@ func storeWriteNode(iow io.Writer, r *MTnode) {
 	}
 }
 
-func storeWriteDir(iow io.Writer, r *MTnode) {
+func storeWriteFileDir(iow io.Writer, r *MTnode) {
 	leafOnly := false
 	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
-		storeWriteNode(iow, r)
+		storeWriteFileNode(iow, r)
 	}
 
 	if !r.IsDir() {
@@ -49,13 +51,13 @@ func storeWriteDir(iow io.Writer, r *MTnode) {
 	}
 
 	for _, c := range r.Children() {
-		storeWriteDir(iow, c)
+		storeWriteFileDir(iow, c)
 	}
 }
 
 func storeWriteFile(iow io.Writer, r *MTnode) {
 	fmt.Fprintf(iow, "mtree-file-0.2\n")
-	storeWriteDir(iow, r)
+	storeWriteFileDir(iow, r)
 }
 
 func atoi(s string) (int64, error) {
@@ -136,7 +138,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 					return nil, fmt.Errorf("Corrupt mtree file: %s near %s",
 						mfname, txt)
 				}
-				wpath += scanner.Text()
+				wpath += "\n" + scanner.Text()
 			}
 			if wpath[0] == '/' {
 				hasRoot = true
@@ -147,6 +149,30 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 			ppent, pparent = ensureParentDir(root, wpath, pparent, ppent)
 			name := path.Base(wpath)
 			cur = newRes(ppent, name, mode)
+
+		case false && strings.HasPrefix(txt, "D: "): // Data
+			tsp := txt[3:]
+			tsps := strings.SplitN(tsp, " ", 2)
+			if len(tsps) != 2 {
+				return nil, fmt.Errorf("Corrupt mtree file: %s near: %s",
+					mfname, txt)
+			}
+			sizeStr, wData := tsps[0], tsps[1]
+
+			size, err := atoi(sizeStr)
+			if err != nil {
+				return nil, fmt.Errorf("Corrupt mtree file: %s near: %s",
+					mfname, txt)
+			}
+
+			for size > int64(len(wData)) {
+				if !scanner.Scan() {
+					return nil, fmt.Errorf("Corrupt mtree file: %s near %s",
+						mfname, txt)
+				}
+				wData += "\n" + scanner.Text()
+			}
+			// cur.data = wData
 
 		case strings.HasPrefix(txt, "MT: "): // Modified Time
 			modtimeLine := txt[4:]
@@ -231,9 +257,9 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 }
 
-func tmSnapName(tm time.Time) string {
+func tmBaseName(tm time.Time) string {
 	// In old speak: "%Y-%m-%d--%H%MZ
-	return tm.Format("2006-01-02--1504Z") + ".mtree"
+	return tm.Format("2006-01-02--1504Z")
 }
 
 func hasSuffixMtree(name string) bool {
@@ -276,4 +302,58 @@ func latestSnapshot(dmt string, flagProgress bool) (*MTnode, error) {
 	}
 
 	return m2, nil
+}
+
+func storeWriteDataSymlink(dmt, ndmt, ndfn string, r *MTnode) error {
+	if err := os.MkdirAll(dmt, 0770); err != nil {
+		return err
+	}
+
+	fo, err := roc.Create(ndmt)
+	if err != nil {
+		return err
+	}
+	defer fo.Close()
+
+	// FIXME: Race with MtreePath() and not efficient
+	fmt.Println("JDBG:", ndmt, ndfn)
+
+	data, err := os.Readlink(ndfn)
+	if err != nil { // Ignore read errors
+		fmt.Println("JDBG:", ndfn, err)
+		return nil
+	}
+
+	if _, err := fo.WriteString(data); err != nil {
+		return err
+	}
+
+	if err := fo.CloseRename(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// storeWriteData writes the data for the non-regular files to the .mtree/data
+// dmt: path to the .mtree/data/<foo>
+// dfn: path to the FS (parent of mtree)
+func storeWriteData(dmt, dfn string, r *MTnode) error {
+	ndmt := dmt + "/" + r.name
+	ndfn := dfn + "/" + r.name
+
+	if r.IsSymlink() { // Atm. just symlink data
+		return storeWriteDataSymlink(dmt, ndmt, ndfn, r)
+	}
+
+	if !r.IsDir() {
+		return nil
+	}
+
+	for _, c := range r.Children() {
+		if err := storeWriteData(ndmt, ndfn, c); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
