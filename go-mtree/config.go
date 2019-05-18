@@ -40,16 +40,21 @@ func findDotMtree(path string) (string, string) {
 	return "", ""
 }
 
-func latestMtree(dmt, path string) string {
-	dmtl := dmt + "/local/"
-	files, err := ioutil.ReadDir(dmtl)
+func latestMtree(dir string) (string, error) {
+	files, err := ioutil.ReadDir(dir) // Eh. wastes some resources...
 	if err != nil {
-		panic(err)
+		return "", err
 	}
 
 	latest := ""
-	for _, file := range files {
+	for _, file := range files { // This is sorted, so last is newest...
 		fname := file.Name()
+
+		// Format should be same as tmBaseName() ... need more checks.
+		if len(fname) < len("2006-01-02--1504Z.mtree") {
+			continue
+		}
+
 		switch {
 		case strings.HasSuffix(fname, ".mtree"):
 			latest = fname
@@ -63,9 +68,8 @@ func latestMtree(dmt, path string) string {
 	}
 
 	if latest == "" {
-		fmt.Fprintln(os.Stderr, "Can't find a local snapshot from:", dmt)
-		os.Exit(1)
+		return "", fmt.Errorf("Can't find a local snapshot from: %s", dir)
 	}
 
-	return latest
+	return latest, nil
 }

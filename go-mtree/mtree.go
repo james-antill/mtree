@@ -803,6 +803,10 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 		return
 	}
 
+	if res.csums != nil {
+		return
+	}
+
 	fp := res.Path()
 
 	p := strings.TrimPrefix(fp, trimPrefix)
@@ -843,6 +847,10 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 // cacheNodes reads the cache information for each node, keeps order the same.
 func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
 	trimPrefix string) <-chan *MTnode {
+	if cache == nil {
+		return nodes
+	}
+
 	cacheNodes := make(chan *MTnode, qlen)
 
 	var wg sync.WaitGroup
@@ -956,7 +964,7 @@ func first(r *MTnode) *MTnode {
 // MtreePath Generate data from FS for root path. Also returns last snapshot,
 // if available.
 func MtreePath(root string, needCachingData, filter,
-	progress bool) (*MTnode, *MTnode, error) {
+	progress, needOldSnap bool) (*MTnode, *MTnode, error) {
 
 	numDigesters := numCPUDigesters()
 
@@ -974,10 +982,12 @@ func MtreePath(root string, needCachingData, filter,
 
 	var oret *MTnode
 	var dmtOff string
-	if cache, off := maybeLatestSnapshot(root, progress); cache != nil {
+	if osnap, cache, off := maybeLatestSnapshotCache(root, needOldSnap,
+		progress); osnap != nil || cache != nil {
 		nodes = statNodes(nodes, numDigesters)
 		nodes = cacheNodes(nodes, numDigesters, cache, root+"/")
-		oret = cache
+		nodes = cacheNodes(nodes, numDigesters, osnap, root+"/")
+		oret = osnap
 		dmtOff = off
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
@@ -1013,6 +1023,11 @@ func MtreePath(root string, needCachingData, filter,
 	} else { // The .mtree root
 		if dmtOff == "" {
 			ret.parent = nil
+
+			// FIXME: could be concurrent ... but need to wait.
+			// FIXME: Needs to only write a new file when it changes...
+			// FIXME: Cleanup old files.
+			storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
 		} else {
 			parents := len(strings.Split(dmtOff, "/"))
 			mtree := ret
@@ -1031,14 +1046,14 @@ func MtreePath(root string, needCachingData, filter,
 
 // MtreePathOrFile Generate data from FS for root path, or from an mtree file
 func MtreePathOrFile(root string, needCachingData, filter,
-	progress bool) (*MTnode, *MTnode, error) {
+	progress, needOldSnap bool) (*MTnode, *MTnode, error) {
 
 	fi, err := os.Stat(root)
 	if err != nil {
 		return nil, nil, err
 	}
 	if fi.IsDir() || !strings.Contains(root, ".mtree") {
-		return MtreePath(root, needCachingData, filter, progress)
+		return MtreePath(root, needCachingData, filter, progress, needOldSnap)
 	}
 
 	m, e := MtreeFile(root, progress)
@@ -1377,24 +1392,52 @@ func mkpathMust(r, p string) {
 	}
 }
 
-func maybeLatestSnapshot(path string, flagProgress bool) (*MTnode, string) {
+func maybeLatestSnapshotCache(path string, needOldSnap,
+	flagProgress bool) (*MTnode, *MTnode, string) {
 	dmt, off := findDotMtree(path)
 	if dmt == "" {
-		return nil, ""
+		return nil, nil, ""
 	}
-	omtree, err := latestSnapshot(dmt, flagProgress)
-	if err != nil {
-		return nil, ""
+
+	var cache *MTnode
+	var omtree *MTnode
+
+	// FIXME: Don't need to load both...
+	cm, err := latestCache(dmt)
+	if err == nil {
+		fname := dmt + "/cache/" + cm
+		c, _ := MtreeFile(fname, flagProgress)
+		cache = c
 	}
+
+	snapMtree, err := latestSnapshot(dmt, flagProgress)
+	if err == nil {
+		fname := dmt + "/local/" + snapMtree
+		o, _ := MtreeFile(fname, flagProgress)
+		omtree = o
+	}
+
 	if off != "" {
-		omtree, err = mtreeChdir(omtree, off)
-		if err != nil {
-			return nil, ""
+		if cache != nil {
+			cache, err = mtreeChdir(cache, off)
+			if err != nil {
+				cache = nil
+			}
+		}
+		if omtree != nil {
+			omtree, err = mtreeChdir(omtree, off)
+			if err != nil {
+				omtree = nil
+			}
 		}
 		// FIXME: if off is a file?
 	}
 
-	return omtree, off
+	if cache == nil && omtree == nil {
+		off = ""
+	}
+
+	return omtree, cache, off
 }
 
 func main() {
@@ -1518,7 +1561,7 @@ func main() {
 		calcChecksumsDone()
 
 	case cmdDifference:
-		if flagHelp || flag.NArg() < 2 || flag.NArg() > 3 {
+		if flagHelp || flag.NArg() < 1 || flag.NArg() > 3 {
 			fullUsageCmdConfig(usageExitCode)
 		}
 
@@ -1531,9 +1574,11 @@ func main() {
 	// Create an mtree, or two
 	var mtree *MTnode
 	var omtree *MTnode
+	needOldSnap := false
 	switch cmdID {
 	case cmdSnapshot:
 		cachingData = true
+		needOldSnap = true
 		fallthrough
 	case cmdList:
 		fallthrough
@@ -1544,7 +1589,8 @@ func main() {
 	case cmdSummary:
 		fallthrough
 	case cmdEqual:
-		m, o, err := MtreePath(flag.Arg(1), cachingData, flagFilter, flagProgress)
+		m, o, err := MtreePath(flag.Arg(1), cachingData, flagFilter,
+			flagProgress, needOldSnap)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -1563,30 +1609,38 @@ func main() {
 
 	case cmdDifference:
 		// FIXME: If dirs.
-		// diff = current vs. last snap ???
+		// diff = current vs. last snap
 		// diff x = current x vs. last snap
 		// diff dirx filey / filex diry = load snap from file and diff.
 
-		m1, m2, err := MtreePathOrFile(flag.Arg(1),
-			cachingData, flagFilter, flagProgress)
+		autoArg := "."
+		if flag.NArg() > 1 {
+			autoArg = flag.Arg(1)
+		}
+
+		m1, m2, err := MtreePathOrFile(autoArg,
+			cachingData, flagFilter, flagProgress, true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 
-		if flag.NArg() == 2 {
+		if flag.NArg() <= 2 {
 			mtree = m1
-			dmt, off := findDotMtree(flag.Arg(1))
+			dmt, off := findDotMtree(autoArg)
 			if dmt == "" {
-				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
+				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", autoArg)
 				os.Exit(1)
 			}
 			omtree = m2
 			if m2 == nil { // This should fail, or we'd get it from the cache
-				omtree, err = latestSnapshot(dmt, flagProgress)
+				omtreeName, err := latestSnapshot(dmt, flagProgress)
+				if err == nil {
+					omtree, err = MtreeFile(dmt+"/"+omtreeName, flagProgress)
+				}
 				if err != nil {
-					fmt.Fprintln(os.Stderr, "Can't load .mtree from:",
-						flag.Arg(1), err)
+					fmt.Fprintln(os.Stderr, "Can't load snapshot from:",
+						dmt, err)
 					os.Exit(1)
 				}
 				if off != "" {
@@ -1603,7 +1657,7 @@ func main() {
 		omtree = m1
 
 		m2, _, err = MtreePathOrFile(flag.Arg(2),
-			cachingData, flagFilter, flagProgress)
+			cachingData, flagFilter, flagProgress, false)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -1699,6 +1753,7 @@ func main() {
 
 		if omtree != nil && cmpChksumEq(omtree, mtree) {
 			fmt.Println("Nothing changed:")
+			// prntListMtree(mtree, false, flagUI, "")
 			prntInfoMtree(mtree, cachingData, flagUI)
 			break
 		}
@@ -1721,32 +1776,12 @@ func main() {
 			}
 		}
 
-		bfn := tmBaseName(time.Now().UTC())
-		sdfn := dmt + "/data/" + bfn
-		dtree := path.Dir(path.Dir(dmt))
-		if err := storeWriteData(sdfn, dtree, mtree); err != nil {
-			fmt.Fprintln(os.Stderr, "snap data:", err)
-			os.Exit(1)
-		}
-
-		nfn := dmt + "/local/" + bfn + ".mtree"
-		fo, err := roc.Create(nfn)
+		bfn, err := storeWriteDotMtree(dmt, "/local/", true, mtree)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "snap:", err)
-			os.Exit(1)
-		}
-		defer fo.Close()
-
-		iow := bufio.NewWriter(fo)
-		storeWriteFile(iow, mtree)
-		if err := iow.Flush(); err != nil {
 			fmt.Fprintln(os.Stderr, "Can't write snap:", err)
 			os.Exit(1)
 		}
-		if err := fo.CloseRename(); err != nil {
-			fmt.Fprintln(os.Stderr, "Can't write snap:", err)
-			os.Exit(1)
-		}
+		nfn := dmt + "/local/" + bfn + ".mtree"
 
 		// Now we write the mtree of the latest mtree ... :-o
 		rootx2 := rootRes()
@@ -1766,9 +1801,9 @@ func main() {
 			fmt.Fprintln(os.Stderr, "snap:", err)
 			os.Exit(1)
 		}
-		defer fo.Close()
+		defer fox2.Close()
 
-		iow = bufio.NewWriter(fox2)
+		iow := bufio.NewWriter(fox2)
 
 		storeWriteFile(iow, mtreex2ll)
 		if err := iow.Flush(); err != nil {
@@ -1790,6 +1825,7 @@ func main() {
 		mkpathMust(flag.Arg(1), ".mtree/local")
 		mkpathMust(flag.Arg(1), ".mtree/remote")
 		mkpathMust(flag.Arg(1), ".mtree/cache")
+		mkpathMust(flag.Arg(1), ".mtree/data")
 		// FIXME: Dump config to .mtree/config
 
 	case cmdDifference:

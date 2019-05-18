@@ -276,12 +276,12 @@ func hasSuffixMtree(name string) bool {
 	return false
 }
 
-func latestSnapshot(dmt string, flagProgress bool) (*MTnode, error) {
+func latestSnapshot(dmt string, flagProgress bool) (string, error) {
 	// Find the latest snapshot file from a given .mtree dir...
 	mh, err := MtreeFile(dmt+"/HEAD", flagProgress)
 	if err != nil {
 		// FIXME: Error.Wrap
-		return nil, fmt.Errorf("Can't load .mtree/HEAD from: %s (%v)", dmt, err)
+		return "", fmt.Errorf("Can't load .mtree/HEAD from: %s (%v)", dmt, err)
 	}
 	mh, _ = mtreeChdir(mh, "local")
 	mh.parent = nil // Kind of hacky atm. ... for Path()
@@ -294,14 +294,20 @@ func latestSnapshot(dmt string, flagProgress bool) (*MTnode, error) {
 		}
 	}
 	if mhl == nil {
-		return nil, fmt.Errorf("Can't load .mtree/HEAD from: %s", dmt)
-	}
-	m2, err := MtreeFile(dmt+"/"+mhl.Path(), flagProgress)
-	if err != nil {
-		return nil, err
+		return "", fmt.Errorf("Can't load .mtree/HEAD from: %s", dmt)
 	}
 
-	return m2, nil
+	return mhl.Name(), nil
+}
+
+func latestCache(dmt string) (string, error) {
+	dmtc := dmt + "/cache/"
+	fname, err := latestMtree(dmtc)
+	if err != nil {
+		return "", err
+	}
+
+	return fname, nil
 }
 
 func storeWriteDataSymlink(dmt, ndmt, ndfn string, r *MTnode) error {
@@ -355,4 +361,39 @@ func storeWriteData(dmt, dfn string, r *MTnode) error {
 	}
 
 	return nil
+}
+
+func storeWriteDotMtree(dmt, prefix string, saveData bool,
+	mtree *MTnode) (string, error) {
+	bfn := tmBaseName(time.Now().UTC())
+
+	if saveData {
+		sdfn := dmt + "/data/" + bfn
+		dtree := path.Dir(path.Dir(dmt))
+		if err := storeWriteData(sdfn, dtree, mtree); err != nil {
+			fmt.Println("JDBG:", err)
+			return "", err
+		}
+	}
+
+	nfn := dmt + prefix + bfn + ".mtree"
+	fo, err := roc.Create(nfn)
+	if err != nil {
+		fmt.Println("JDBG:", err)
+		return "", err
+	}
+	defer fo.Close()
+
+	iow := bufio.NewWriter(fo)
+	storeWriteFile(iow, mtree)
+	if err := iow.Flush(); err != nil {
+		fmt.Println("JDBG:", err)
+		return "", err
+	}
+	if err := fo.CloseRename(); err != nil {
+		fmt.Println("JDBG:", err)
+		return "", err
+	}
+
+	return bfn, nil
 }
