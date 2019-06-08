@@ -1027,6 +1027,7 @@ func MtreePath(root string, needCachingData, filter,
 			// FIXME: could be concurrent ... but need to wait.
 			// FIXME: Needs to only write a new file when it changes...
 			// FIXME: Cleanup old files.
+			// FIXME: Needs to do the merging for non-root cache saves.
 			storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
 		} else {
 			parents := len(strings.Split(dmtOff, "/"))
