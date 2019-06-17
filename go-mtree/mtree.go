@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
@@ -1442,6 +1443,15 @@ func maybeLatestSnapshotCache(path string, needOldSnap,
 }
 
 func main() {
+	if os.Getenv("MTREE_PPROF") != "" {
+		f, err := os.Create(os.Getenv("MTREE_PPROF"))
+		if err != nil {
+			panic(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
+
 	var flagHelp bool
 	helpUsage := "show help"
 	flag.BoolVar(&flagHelp, "help", false, helpUsage)
