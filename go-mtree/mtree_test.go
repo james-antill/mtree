@@ -160,11 +160,12 @@ func TestFS(t *testing.T) {
 		filt := data[i].filt
 		res := data[i].res
 
-		root, _, err := MtreePath(path, false, filt, false, false)
+		mtr, err := MtreePath(path, false, filt, false, false)
 		if err != nil {
 			t.Errorf("MtreePath(%s): %v\n", path, err)
 			return
 		}
+		root := mtr.Nodes
 
 		val := fmt.Sprintf("%x", root.Checksum("sha256"))
 		if val != res {

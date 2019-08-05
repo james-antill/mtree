@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"runtime/pprof"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -962,16 +963,38 @@ func first(r *MTnode) *MTnode {
 	return first(r.children[0])
 }
 
+type MTConfRemote struct {
+	Name string
+	URL  string
+	User string
+}
+
+type MTConf struct {
+	Remote    *MTConfRemote
+	AutoScrub uint // Auto scrub amount in 0.01% units. 0-10000
+	checkSums []string
+}
+
+type MTRoot struct {
+	Nodes          *MTnode
+	Cache          *MTnode
+	LatestSnapshot *MTnode
+
+	DotMtreePath string
+	RootOffset   string
+	Conf         *MTConf
+}
+
 // MtreePath Generate data from FS for root path. Also returns last snapshot,
 // if available.
 func MtreePath(root string, needCachingData, filter,
-	progress, needOldSnap bool) (*MTnode, *MTnode, error) {
+	progress, needOldSnap bool) (*MTRoot, error) {
 
 	numDigesters := numCPUDigesters()
 
 	root, err := normPath(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	rootNode, nodes, errc := walkFiles(root, numDigesters, filter)
@@ -981,15 +1004,32 @@ func MtreePath(root string, needCachingData, filter,
 		nodes, numNodes = progressLenNodes(nodes, numDigesters)
 	}
 
-	var oret *MTnode
-	var dmtOff string
-	if osnap, cache, off := maybeLatestSnapshotCache(root, needOldSnap,
-		progress); osnap != nil || cache != nil {
+	retRoot := &MTRoot{}
+	hasCache := setupConfig(retRoot, root)
+
+	if hasCache {
+		maybeLatestSnapshotCache(retRoot, needOldSnap, progress)
+		cache := retRoot.Cache
+		osnap := retRoot.LatestSnapshot
+		if retRoot.RootOffset != "" {
+			if cache != nil {
+				cache, err = mtreeChdir(cache, retRoot.RootOffset)
+				if err != nil {
+					cache = nil
+				}
+			}
+			if osnap != nil {
+				osnap, err = mtreeChdir(osnap, retRoot.RootOffset)
+				if err != nil {
+					osnap = nil
+				}
+			}
+			// FIXME: if off is a file?
+		}
+
 		nodes = statNodes(nodes, numDigesters)
 		nodes = cacheNodes(nodes, numDigesters, cache, root+"/")
 		nodes = cacheNodes(nodes, numDigesters, osnap, root+"/")
-		oret = osnap
-		dmtOff = off
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
 	}
@@ -1008,21 +1048,21 @@ func MtreePath(root string, needCachingData, filter,
 
 	// Check whether the Walk failed.
 	if err := <-errc; err != nil { // HLerrc
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Walk to the starting point:
 	ret := ensureDir(rootNode, root)
 
 	// Blank the full path out at either:
-	if oret == nil { // The user supplied path (nearest dir.)
+	if retRoot.LatestSnapshot == nil { // The user supplied path (nearest dir.)
 		dir := ret
 		if !dir.IsDir() {
 			dir = dir.parent
 		}
 		dir.parent = nil
 	} else { // The .mtree root
-		if dmtOff == "" {
+		if retRoot.DotMtreePath == "" {
 			ret.parent = nil
 
 			// FIXME: could be concurrent ... but need to wait.
@@ -1031,11 +1071,12 @@ func MtreePath(root string, needCachingData, filter,
 			// FIXME: Needs to do the merging for non-root cache saves.
 			storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
 		} else {
-			parents := len(strings.Split(dmtOff, "/"))
+			parents := len(strings.Split(retRoot.RootOffset, "/"))
 			mtree := ret
 			for i := 0; i < parents; i++ {
 				if mtree.parent == nil {
-					panic("Bad subset")
+					panic(fmt.Sprintf("Bad subset: %s = %s",
+						retRoot.RootOffset, ret.Path()))
 				}
 				mtree = mtree.parent
 			}
@@ -1043,23 +1084,30 @@ func MtreePath(root string, needCachingData, filter,
 		}
 	}
 
-	return ret, oret, nil
+	retRoot.Nodes = ret
+
+	return retRoot, nil
 }
 
 // MtreePathOrFile Generate data from FS for root path, or from an mtree file
 func MtreePathOrFile(root string, needCachingData, filter,
-	progress, needOldSnap bool) (*MTnode, *MTnode, error) {
+	progress, needOldSnap bool) (*MTRoot, error) {
 
 	fi, err := os.Stat(root)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if fi.IsDir() || !strings.Contains(root, ".mtree") {
 		return MtreePath(root, needCachingData, filter, progress, needOldSnap)
 	}
 
 	m, e := MtreeFile(root, progress)
-	return m, nil, e
+	if e != nil {
+		return nil, err
+	}
+
+	retRoot := &MTRoot{Nodes: m}
+	return retRoot, nil
 }
 
 // UI names for KiloBytes etc.
@@ -1274,8 +1322,16 @@ func fullUsageCmdConfig(exitCode int) {
 	flag.PrintDefaults()
 	os.Exit(exitCode)
 }
+func usageCmdDiff() {
+	fmt.Fprintln(os.Stderr, "Usage: mtree diff [file/dir] [file/dir]")
+}
+func fullUsageCmdDiff(exitCode int) {
+	usageCmdDiff()
+	flag.PrintDefaults()
+	os.Exit(exitCode)
+}
 func usageCmdDef() {
-	fmt.Fprintln(os.Stderr, "Usage: mtree config|equal|list|summary|tree <dir> [check...]")
+	fmt.Fprintln(os.Stderr, "Usage: mtree config|diff|equal|list|summary|snap|tree <dir> [check...]")
 }
 func fullUsageCmdDef(exitCode int) {
 	usageCmdDef()
@@ -1297,6 +1353,7 @@ const (
 	cmdInitialize
 	cmdDifference
 	cmdFile
+	cmdFileSum
 )
 
 func parseCmd(cmd string) cmdType {
@@ -1378,6 +1435,8 @@ func parseCmd(cmd string) cmdType {
 
 	case "file": // FIXME:
 		return cmdFile
+	case "file-sum": // FIXME:
+		return cmdFileSum
 
 	default:
 		return cmdUnknown
@@ -1394,52 +1453,65 @@ func mkpathMust(r, p string) {
 	}
 }
 
-func maybeLatestSnapshotCache(path string, needOldSnap,
-	flagProgress bool) (*MTnode, *MTnode, string) {
+func setupConfig(mtr *MTRoot, path string) bool {
 	dmt, off := findDotMtree(path)
 	if dmt == "" {
-		return nil, nil, ""
+		return false
+	}
+	mtr.DotMtreePath = dmt
+	mtr.RootOffset = off
+
+	// Load the config.
+	cfg, err := ini.Load(dmt + "/config")
+	if err == nil {
+		const p string = "remote "
+
+		mtr.Conf = &MTConf{}
+		mtr.Conf.AutoScrub = cfg.Section("core").Key("autoscrub").MustUint(0)
+		// FIXME: checksums...
+
+		for _, sec := range cfg.Sections() {
+			sn := sec.Name()
+			if !strings.HasPrefix(sn, p) {
+				continue
+			}
+			if usn, err := strconv.Unquote(sn[len(p):]); err != nil {
+				continue
+			} else {
+				sn = usn
+			}
+
+			mtr.Conf.Remote = &MTConfRemote{}
+			mtr.Conf.Remote.Name = sn
+			if url, e := sec.GetKey("url"); e == nil {
+				mtr.Conf.Remote.URL = url.MustString("")
+			}
+			if url, e := sec.GetKey("user"); e == nil {
+				mtr.Conf.Remote.User = url.MustString("")
+			}
+		}
 	}
 
-	var cache *MTnode
-	var omtree *MTnode
+	return true
+}
 
-	// FIXME: Don't need to load both...
+func maybeLatestSnapshotCache(mtr *MTRoot, needOldSnap, flagProgress bool) {
+	dmt := mtr.DotMtreePath
+
+	// FIXME: Don't need to load both, optimize it all away behind functions...
 	cm, err := latestCache(dmt)
 	if err == nil {
 		fname := dmt + "/cache/" + cm
 		c, _ := MtreeFile(fname, flagProgress)
-		cache = c
+		mtr.Cache = c
 	}
 
 	snapMtree, err := latestSnapshot(dmt, flagProgress)
 	if err == nil {
 		fname := dmt + "/local/" + snapMtree
 		o, _ := MtreeFile(fname, flagProgress)
-		omtree = o
+		mtr.LatestSnapshot = o
 	}
-
-	if off != "" {
-		if cache != nil {
-			cache, err = mtreeChdir(cache, off)
-			if err != nil {
-				cache = nil
-			}
-		}
-		if omtree != nil {
-			omtree, err = mtreeChdir(omtree, off)
-			if err != nil {
-				omtree = nil
-			}
-		}
-		// FIXME: if off is a file?
-	}
-
-	if cache == nil && omtree == nil {
-		off = ""
-	}
-
-	return omtree, cache, off
 }
 
 func main() {
@@ -1573,7 +1645,7 @@ func main() {
 
 	case cmdDifference:
 		if flagHelp || flag.NArg() < 1 || flag.NArg() > 3 {
-			fullUsageCmdConfig(usageExitCode)
+			fullUsageCmdDiff(usageExitCode)
 		}
 
 	default:
@@ -1583,10 +1655,17 @@ func main() {
 	}
 
 	// Create an mtree, or two
-	var mtree *MTnode
+	var mtr *MTRoot
 	var omtree *MTnode
 	needOldSnap := false
 	switch cmdID {
+	case cmdConfig:
+		mtr = &MTRoot{}
+		dot, err := normPath(".")
+		if err == nil {
+			setupConfig(mtr, dot)
+		}
+
 	case cmdSnapshot:
 		cachingData = true
 		needOldSnap = true
@@ -1600,23 +1679,28 @@ func main() {
 	case cmdSummary:
 		fallthrough
 	case cmdEqual:
-		m, o, err := MtreePath(flag.Arg(1), cachingData, flagFilter,
+		m, err := MtreePath(flag.Arg(1), cachingData, flagFilter,
 			flagProgress, needOldSnap)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		mtree = m
-		omtree = o
+		mtr = m
 
 	case cmdFile:
+		fallthrough
+	case cmdFileSum:
 		m, err := MtreeFile(flag.Arg(1), flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		mtree = m
-		cmdID = cmdInfo
+		mtr = &MTRoot{Nodes: m}
+		if cmdID == cmdFile {
+			cmdID = cmdInfo
+		} else {
+			cmdID = cmdSummary
+		}
 
 	case cmdDifference:
 		// FIXME: If dirs.
@@ -1629,22 +1713,22 @@ func main() {
 			autoArg = flag.Arg(1)
 		}
 
-		m1, m2, err := MtreePathOrFile(autoArg,
+		m, err := MtreePathOrFile(autoArg,
 			cachingData, flagFilter, flagProgress, true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		mtr = m
 
 		if flag.NArg() <= 2 {
-			mtree = m1
 			dmt, off := findDotMtree(autoArg)
 			if dmt == "" {
 				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", autoArg)
 				os.Exit(1)
 			}
-			omtree = m2
-			if m2 == nil { // This should fail, or we'd get it from the cache
+			omtree = mtr.LatestSnapshot
+			if omtree == nil { // This should fail, or we'd get it from the cache
 				omtreeName, err := latestSnapshot(dmt, flagProgress)
 				if err == nil {
 					omtree, err = MtreeFile(dmt+"/"+omtreeName, flagProgress)
@@ -1655,7 +1739,7 @@ func main() {
 					os.Exit(1)
 				}
 				if off != "" {
-					m2, err = mtreeChdir(omtree, off)
+					omtree, err = mtreeChdir(omtree, off)
 					if err != nil {
 						fmt.Fprintln(os.Stderr, "Can't find old off:",
 							"from:", omtree.Path(), err)
@@ -1665,15 +1749,19 @@ func main() {
 			}
 			break
 		}
-		omtree = m1
+		omtree = mtr.Nodes
 
-		m2, _, err = MtreePathOrFile(flag.Arg(2),
+		mtr, err = MtreePathOrFile(flag.Arg(2),
 			cachingData, flagFilter, flagProgress, false)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		mtree = m2
+	}
+
+	var mtree *MTnode
+	if mtr != nil {
+		mtree = mtr.Nodes
 	}
 
 	switch cmdID {
@@ -1735,19 +1823,29 @@ func main() {
 		path := fmt.Sprintf("%s/.config/mtree/config", usr.HomeDir)
 		cfg, err := ini.Load(path)
 		if err != nil {
-			fmt.Printf("Fail to read file: %v", err)
-			os.Exit(1)
+			fmt.Printf("Fail to read config file: %v", err)
+		} else {
+			fmt.Println("[core]")
+			for _, key := range []string{"progress", "ui", "ui-checksum-length",
+				"checksums"} {
+				fmt.Println(key, "=", cfg.Section("core").Key(key))
+			}
+
+			fmt.Println("[alias]")
+			for _, key := range cfg.Section("alias").KeyStrings() {
+				fmt.Println(key, "=", cfg.Section("alias").Key(key))
+			}
 		}
 
-		fmt.Println("[core]")
-		for _, key := range []string{"progress", "ui", "ui-checksum-length",
-			"checksums"} {
-			fmt.Println(key, "=", cfg.Section("core").Key(key))
-		}
-
-		fmt.Println("[alias]")
-		for _, key := range cfg.Section("alias").KeyStrings() {
-			fmt.Println(key, "=", cfg.Section("alias").Key(key))
+		if mtr != nil && mtr.Conf != nil {
+			fmt.Println("== \"" + mtr.RootOffset + ".mtree/config\" ==")
+			fmt.Println("[core]")
+			fmt.Println("autocrub = ", mtr.Conf.AutoScrub)
+			if mtr.Conf.Remote != nil {
+				fmt.Printf("[remote %s]\n", strconv.Quote(mtr.Conf.Remote.Name))
+				fmt.Printf("url  = %s\n", mtr.Conf.Remote.URL)
+				fmt.Printf("user = %s\n", mtr.Conf.Remote.User)
+			}
 		}
 
 	case cmdSnapshot:
