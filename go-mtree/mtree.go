@@ -24,7 +24,10 @@ import (
 	"github.com/james-antill/mpb/decor"
 	roc "github.com/james-antill/rename-on-close"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/terminal"
+
+	"github.com/pkg/sftp"
 
 	"gopkg.in/ini.v1"
 )
@@ -751,7 +754,7 @@ func statNode(res *MTnode) {
 	p := res.Path()
 	if fi, err := os.Lstat(p); err == nil {
 		res.mtimeNsecs = fi.ModTime().UnixNano()
-		res.size = fi.Size() // Note that this is filled in by digest
+		// res.size = fi.Size() // Note that this is filled in by digest
 	}
 	// FIXME: If it's wanted, fill in uid/etc.
 }
@@ -967,6 +970,11 @@ type MTConfRemote struct {
 	Name string
 	URL  string
 	User string
+
+	// FIXME: use interface...
+	dlType string // http/https or ssh/scp/sftp
+	dlSSH  *ssh.Client
+	dlSFTP *sftp.Client
 }
 
 type MTConf struct {
@@ -1062,7 +1070,7 @@ func MtreePath(root string, needCachingData, filter,
 		}
 		dir.parent = nil
 	} else { // The .mtree root
-		if retRoot.DotMtreePath == "" {
+		if retRoot.RootOffset == "" {
 			ret.parent = nil
 
 			// FIXME: could be concurrent ... but need to wait.
@@ -1331,7 +1339,21 @@ func fullUsageCmdDiff(exitCode int) {
 	os.Exit(exitCode)
 }
 func usageCmdDef() {
-	fmt.Fprintln(os.Stderr, "Usage: mtree config|diff|equal|list|summary|snap|tree <dir> [check...]")
+	fmt.Fprintln(os.Stderr, "Usage: mtree <cmd> [args...]")
+	fmt.Fprintln(os.Stderr, "             list     [dir]")
+	fmt.Fprintln(os.Stderr, "             tree     [dir]")
+	fmt.Fprintln(os.Stderr, "             info     [dir]")
+	fmt.Fprintln(os.Stderr, "             summary  [dir]")
+	fmt.Fprintln(os.Stderr, "             diff     [dir/*.mtree] [dir/*.mtree]")
+	fmt.Fprintln(os.Stderr, "             equal    <dir> <checksums>")
+
+	fmt.Fprintln(os.Stderr, "             init     <dir>")
+	fmt.Fprintln(os.Stderr, "             snapshot <dir>")
+	fmt.Fprintln(os.Stderr, "             config")
+	fmt.Fprintln(os.Stderr, "             pull")
+	fmt.Fprintln(os.Stderr, "             sync     [dir]")
+	fmt.Fprintln(os.Stderr, "             download [dir]")
+	fmt.Fprintln(os.Stderr, "             rdiff")
 }
 func fullUsageCmdDef(exitCode int) {
 	usageCmdDef()
@@ -1354,10 +1376,15 @@ const (
 	cmdDifference
 	cmdFile
 	cmdFileSum
+	cmdPull
+	cmdSyncMod
+	cmdSyncDel
+	cmdDownload
+	cmdRdiff
 )
 
-func parseCmd(cmd string) cmdType {
-	switch cmd {
+func parseCmd(cmd []string) (cmdType, []string) {
+	switch cmd[0] {
 	case "directory-ls":
 		fallthrough
 	case "directory-list":
@@ -1369,14 +1396,14 @@ func parseCmd(cmd string) cmdType {
 	case "ls":
 		fallthrough
 	case "list":
-		return cmdList
+		return cmdList, cmd[1:]
 
 	case "directory-tree":
 		fallthrough
 	case "dir-tree":
 		fallthrough
 	case "tree":
-		return cmdTree
+		return cmdTree, cmd[1:]
 
 	case "directory-information":
 		fallthrough
@@ -1389,7 +1416,7 @@ func parseCmd(cmd string) cmdType {
 	case "dir-info":
 		fallthrough
 	case "info":
-		return cmdInfo
+		return cmdInfo, cmd[1:]
 
 	case "directory-sum":
 		fallthrough
@@ -1402,7 +1429,7 @@ func parseCmd(cmd string) cmdType {
 	case "sum":
 		fallthrough
 	case "summary":
-		return cmdSummary
+		return cmdSummary, cmd[1:]
 
 	case "eq":
 		fallthrough
@@ -1411,35 +1438,61 @@ func parseCmd(cmd string) cmdType {
 	case "chk":
 		fallthrough
 	case "check":
-		return cmdEqual
+		return cmdEqual, cmd[1:]
 
 	case "configuration":
 		fallthrough
 	case "config":
 		fallthrough
 	case "conf":
-		return cmdConfig
+		return cmdConfig, cmd[1:]
 
 	case "snapshot":
 		fallthrough
 	case "snap":
-		return cmdSnapshot
+		return cmdSnapshot, cmd[1:]
 
 	case "init":
-		return cmdInitialize
+		return cmdInitialize, cmd[1:]
 
 	case "difference":
 		fallthrough
 	case "diff":
-		return cmdDifference
+		if len(cmd) > 1 && cmd[1] == "remote" {
+			return cmdRdiff, cmd[2:]
+
+		}
+		return cmdDifference, cmd[1:]
 
 	case "file": // FIXME:
-		return cmdFile
+		return cmdFile, cmd[1:]
 	case "file-sum": // FIXME:
-		return cmdFileSum
+		return cmdFileSum, cmd[1:]
+
+	case "pull":
+		return cmdPull, cmd[1:]
+
+	case "sync":
+		return cmdSyncMod, cmd[1:]
+	case "sync-del":
+		fallthrough
+	case "sync-delete":
+		return cmdSyncDel, cmd[1:]
+
+	case "dl":
+		fallthrough
+	case "download":
+		return cmdDownload, cmd[1:]
+
+	case "rdiff":
+		fallthrough
+	case "remote-diff":
+		fallthrough
+	case "remote-difference":
+		return cmdRdiff, cmd[1:]
 
 	default:
-		return cmdUnknown
+		return cmdUnknown, nil
 	}
 }
 
@@ -1585,7 +1638,11 @@ func main() {
 		calcChecksumsDone()
 	}
 
-	cmdID := parseCmd(flag.Arg(0))
+	if flag.NArg() < 1 {
+		fullUsageCmdConfig(1)
+	}
+
+	cmdID, args := parseCmd(flag.Args())
 
 	switch cmdID {
 	case cmdList:
@@ -1606,13 +1663,36 @@ func main() {
 	}
 
 	switch cmdID {
+	case cmdList:
+		fallthrough
+	case cmdTree:
+		fallthrough
+	case cmdInfo:
+		fallthrough
+	case cmdSummary:
+		fallthrough
+	case cmdDownload:
+		fallthrough
+	case cmdSyncDel:
+		fallthrough
+	case cmdSyncMod:
+		fallthrough
+	case cmdDifference:
+		fallthrough
+	case cmdRdiff:
+		if len(args) < 1 {
+			args = []string{"."}
+		}
+	}
+
+	switch cmdID {
 	case cmdConfig:
-		if flagHelp || flag.NArg() < 1 {
+		if flagHelp {
 			fullUsageCmdConfig(usageExitCode)
 		}
 
 	case cmdEqual:
-		if flagHelp || flag.NArg() < 3 {
+		if flagHelp || len(args) < 2 {
 			fullUsageCmdEqual(usageExitCode)
 		}
 
@@ -1622,7 +1702,7 @@ func main() {
 		}
 
 		calcChecksumsReset()
-		for _, arg := range flag.Args()[2:] {
+		for _, arg := range args[1:] {
 			i := strings.Index(arg, ":")
 			if i == -1 {
 				fmt.Fprintln(os.Stderr,
@@ -1643,13 +1723,20 @@ func main() {
 		}
 		calcChecksumsDone()
 
+	case cmdRdiff:
+		fallthrough
 	case cmdDifference:
-		if flagHelp || flag.NArg() < 1 || flag.NArg() > 3 {
+		if flagHelp || len(args) > 2 {
 			fullUsageCmdDiff(usageExitCode)
 		}
 
+	case cmdPull:
+		if flagHelp {
+			fullUsageCmdDef(usageExitCode)
+		}
+
 	default:
-		if flagHelp || flag.NArg() != 2 {
+		if flagHelp || len(args) != 1 {
 			fullUsageCmdDef(usageExitCode)
 		}
 	}
@@ -1678,8 +1765,14 @@ func main() {
 		fallthrough
 	case cmdSummary:
 		fallthrough
+	case cmdDownload:
+		fallthrough
+	case cmdSyncDel:
+		fallthrough
+	case cmdSyncMod:
+		fallthrough
 	case cmdEqual:
-		m, err := MtreePath(flag.Arg(1), cachingData, flagFilter,
+		m, err := MtreePath(args[0], cachingData, flagFilter,
 			flagProgress, needOldSnap)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1690,7 +1783,7 @@ func main() {
 	case cmdFile:
 		fallthrough
 	case cmdFileSum:
-		m, err := MtreeFile(flag.Arg(1), flagProgress)
+		m, err := MtreeFile(args[0], flagProgress)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
@@ -1702,18 +1795,53 @@ func main() {
 			cmdID = cmdSummary
 		}
 
+	case cmdRdiff:
+		// FIXME: local vs. upstream
+		dmt, off := findDotMtree(args[0])
+		omtreeName, err := latestSnapshot(dmt, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		omtreeName = off + ".mtree/local/" + omtreeName
+
+		mtr = &MTRoot{}
+		dot, err := normPath(".")
+		if err == nil {
+			setupConfig(mtr, dot)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Can't find .mtree/config.")
+			os.Exit(2)
+		}
+		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
+			fmt.Fprintln(os.Stderr, "No .mtree/config.")
+			os.Exit(2)
+		}
+		if mtr.RootOffset != "" { // FIXME
+			fmt.Fprintln(os.Stderr, "Atm. need to be in the root of the .mtree.")
+			os.Exit(1)
+		}
+
+		rpath := ".mtree/remote/" + mtr.Conf.Remote.Name
+
+		fname, err := latestSnapshot(rpath, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "remote HEAD:", err)
+			os.Exit(1)
+		}
+
+		rmtreeName := rpath + "/" + fname
+		args = []string{rmtreeName, omtreeName}
+		fallthrough
+
 	case cmdDifference:
 		// FIXME: If dirs.
 		// diff = current vs. last snap
 		// diff x = current x vs. last snap
 		// diff dirx filey / filex diry = load snap from file and diff.
 
-		autoArg := "."
-		if flag.NArg() > 1 {
-			autoArg = flag.Arg(1)
-		}
-
-		m, err := MtreePathOrFile(autoArg,
+		m, err := MtreePathOrFile(args[0],
 			cachingData, flagFilter, flagProgress, true)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -1721,10 +1849,10 @@ func main() {
 		}
 		mtr = m
 
-		if flag.NArg() <= 2 {
-			dmt, off := findDotMtree(autoArg)
+		if len(args) <= 1 {
+			dmt, off := findDotMtree(args[0])
 			if dmt == "" {
-				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", autoArg)
+				fmt.Fprintln(os.Stderr, "Can't find .mtree from:", args[0])
 				os.Exit(1)
 			}
 			omtree = mtr.LatestSnapshot
@@ -1751,12 +1879,20 @@ func main() {
 		}
 		omtree = mtr.Nodes
 
-		mtr, err = MtreePathOrFile(flag.Arg(2),
+		mtr, err = MtreePathOrFile(args[1],
 			cachingData, flagFilter, flagProgress, false)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+
+	case cmdPull:
+		mtr = &MTRoot{}
+		dot, err := normPath(".")
+		if err == nil {
+			setupConfig(mtr, dot)
+		}
+
 	}
 
 	var mtree *MTnode
@@ -1777,7 +1913,7 @@ func main() {
 		prntInfoMtree(mtree, cachingData, flagUI)
 
 	case cmdEqual:
-		chkArgs := flag.Args()[2:]
+		chkArgs := args[1:]
 		chkDone := make([]bool, len(chkArgs))
 		failedChecksum := false
 		for _, csum := range calcChecksumKinds {
@@ -1849,9 +1985,9 @@ func main() {
 		}
 
 	case cmdSnapshot:
-		dmt, _ := findDotMtree(flag.Arg(1))
+		dmt, _ := findDotMtree(args[0])
 		if dmt == "" {
-			fmt.Fprintln(os.Stderr, "Can't find .mtree from:", flag.Arg(1))
+			fmt.Fprintln(os.Stderr, "Can't find .mtree from:", args[0])
 			os.Exit(1)
 		}
 
@@ -1930,13 +2066,15 @@ func main() {
 		prntInfoMtree(mtree, cachingData, flagUI)
 
 	case cmdInitialize:
-		mkpathMust(flag.Arg(1), ".mtree")
-		mkpathMust(flag.Arg(1), ".mtree/local")
-		mkpathMust(flag.Arg(1), ".mtree/remote")
-		mkpathMust(flag.Arg(1), ".mtree/cache")
-		mkpathMust(flag.Arg(1), ".mtree/data")
+		mkpathMust(args[0], ".mtree")
+		mkpathMust(args[0], ".mtree/local")
+		mkpathMust(args[0], ".mtree/remote")
+		mkpathMust(args[0], ".mtree/cache")
+		mkpathMust(args[0], ".mtree/data")
 		// FIXME: Dump config to .mtree/config
 
+	case cmdRdiff:
+		fallthrough
 	case cmdDifference:
 		// Make sure the dir. checksums are valid.
 		for _, csum := range calcChecksumKinds {
@@ -1944,6 +2082,131 @@ func main() {
 		}
 
 		prntDiff(omtree, mtree, false, flagUI)
+
+	case cmdPull:
+		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
+			fmt.Fprintln(os.Stderr, "No .mtree/config.")
+			os.Exit(1)
+		}
+
+		if mtr.RootOffset != "" { // FIXME
+			fmt.Fprintln(os.Stderr, "Atm. need to be in the root of the .mtree.")
+			os.Exit(1)
+		}
+
+		fmt.Printf("pulling %s\n", strconv.Quote(mtr.Conf.Remote.Name))
+
+		dlpath := ".mtree/remote/" + mtr.Conf.Remote.Name
+		mkpathMust(path.Dir(mtr.DotMtreePath), dlpath)
+
+		if err := dlSetup(mtr, flagProgress); err != nil {
+			fmt.Fprintln(os.Stderr, "pull:", err)
+			os.Exit(1)
+		}
+		defer dlClose(mtr)
+
+		fmt.Printf("  dl HEAD\n")
+		if err := dlFile(mtr, dlpath, ".mtree/HEAD"); err != nil {
+			fmt.Fprintln(os.Stderr, "remote HEAD:", err)
+			os.Exit(1)
+		}
+
+		fname, err := latestSnapshot(dlpath, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "remote HEAD:", err)
+			os.Exit(1)
+		}
+
+		if false {
+			// FIXME: Need to check the checksums ... sigh
+
+		}
+		fmt.Printf("  dl %s\n", fname)
+
+		if err := dlFile(mtr, dlpath, ".mtree/local/"+fname); err != nil {
+			fmt.Fprintln(os.Stderr, "remote mtree:", err)
+			os.Exit(1)
+		}
+
+	case cmdDownload: // Download missing files
+		fallthrough
+	case cmdSyncDel: // Download missing/changed files, and delete others
+		fallthrough
+	case cmdSyncMod: // Download missing/changed files
+		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
+			fmt.Fprintln(os.Stderr, "No .mtree/config.")
+			os.Exit(1)
+		}
+
+		if mtr.RootOffset != "" { // FIXME
+			fmt.Fprintln(os.Stderr, "Atm. need to be in the root of the .mtree.")
+			os.Exit(1)
+		}
+
+		dlpath := ".mtree/remote/" + mtr.Conf.Remote.Name
+
+		fname, err := latestSnapshot(dlpath, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "remote HEAD:", err)
+			os.Exit(1)
+		}
+		fname = dlpath + "/" + path.Base(fname)
+
+		m, err := MtreeFile(fname, flagProgress)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Remote .mtree:", err)
+			os.Exit(2)
+		}
+
+		if err := dlSetup(mtr, flagProgress); err != nil {
+			fmt.Fprintln(os.Stderr, "pull:", err)
+			os.Exit(1)
+		}
+		defer dlClose(mtr)
+
+		// Note that old is remote, and new is local ... this means:
+		//  Delete's need to be downloaded
+		//  Additions need to be deleted (maybe)
+		cbDiff(m, mtree, func(n *MTnode, cbT cbType, on ...*MTnode) {
+
+			switch cbT {
+			case cbEqual:
+				return
+
+			case cbAdd:
+				if cmdID != cmdSyncDel {
+					return
+				}
+
+				os.RemoveAll(n.Path())
+
+			case cbMod:
+				if n.IsDir() {
+					return
+				}
+
+				if cmdID == cmdDownload {
+					return
+				}
+				fallthrough
+			case cbDel:
+				if n.IsDir() {
+					mkpathMust(n.Path(), "")
+					return
+				}
+
+				rpath := n.Path()
+				fdir := strings.IndexByte(rpath, '/')
+				rpath = rpath[fdir+1:]
+				lpath := path.Dir(rpath)
+
+				fmt.Printf("  dl %s\n", rpath)
+				if err := dlFile(mtr, lpath, rpath); err != nil {
+					fmt.Fprintln(os.Stderr, "remote mtree:", err)
+					os.Exit(1)
+				}
+			}
+		})
 
 	default:
 		usageCmdDef()

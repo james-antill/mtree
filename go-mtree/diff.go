@@ -61,12 +61,20 @@ func cmpChksumEq(r1, r2 *MTnode) bool {
 	return matched
 }
 
-func prntDiff(r1, r2 *MTnode, tree, ui bool) {
+type cbType int
 
+const (
+	cbAdd cbType = iota
+	cbDel
+	cbMod   // Gets the old value as an extra
+	cbEqual // Gets the old value as an extra
+)
+
+func cbDiff(r1, r2 *MTnode, cb func(*MTnode, cbType, ...*MTnode)) {
 	if cmpChksumEq(r1, r2) {
-		prntListMtree(r1, tree, ui, " ")
+		cb(r2, cbEqual, r1)
 	} else {
-		prntListMtree(r2, tree, ui, "!")
+		cb(r2, cbMod, r1)
 	}
 
 	r1s := r1.Children()
@@ -78,24 +86,21 @@ func prntDiff(r1, r2 *MTnode, tree, ui bool) {
 
 		if i1.name != i2.name {
 			if fcmp(i1.name, i2.name) < 0 {
-				prntListMtree(i1, tree, ui, "-")
+				cb(i1, cbDel)
 				r1s = r1s[1:]
 			} else {
-				prntListMtree(i2, tree, ui, "+")
+				cb(i2, cbAdd)
 				r2s = r2s[1:]
 			}
 			continue
 		}
 
 		if cmpChksumEq(i1, i2) {
-			prntListMtree(i1, tree, ui, " ")
+			cb(i2, cbEqual, i1)
 		} else if i1.IsDir() && i2.IsDir() {
-			prntDiff(i1, i2, tree, ui)
-		} else if false {
-			prntListMtree(i1, tree, ui, "-")
-			prntListMtree(i2, tree, ui, "+")
+			cbDiff(i1, i2, cb)
 		} else {
-			prntListMtree(i2, tree, ui, "!")
+			cb(i2, cbMod, i1)
 		}
 
 		r1s = r1s[1:]
@@ -103,9 +108,29 @@ func prntDiff(r1, r2 *MTnode, tree, ui bool) {
 	}
 
 	for _, i1 := range r1s {
-		prntListMtree(i1, tree, ui, "-")
+		cb(i1, cbDel)
 	}
 	for _, i2 := range r2s {
-		prntListMtree(i2, tree, ui, "+")
+		cb(i2, cbAdd)
 	}
+}
+
+func prntDiff(r1, r2 *MTnode, tree, ui bool) {
+	cbDiff(r1, r2, func(n *MTnode, cbT cbType, on ...*MTnode) {
+		switch cbT {
+		case cbAdd:
+			prntListMtree(n, tree, ui, "+")
+		case cbDel:
+			prntListMtree(n, tree, ui, "-")
+		case cbMod:
+			if false {
+				prntListMtree(n, tree, ui, "-")
+				prntListMtree(on[0], tree, ui, "+")
+			} else {
+				prntListMtree(n, tree, ui, "!")
+			}
+		case cbEqual:
+			prntListMtree(n, tree, ui, " ")
+		}
+	})
 }
