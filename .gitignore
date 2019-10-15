@@ -10,3 +10,4 @@ readdir
 pyreaddir.so
 pylstat.so
 ustr-wc
+mtree
