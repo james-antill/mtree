@@ -10,7 +10,6 @@ Big bugs
 
 No real module API atm. -- will happen soon.
 Will move also move to the toplevel.
-Caching got broken recently.
 
 misc bugs/etc.
 ==============

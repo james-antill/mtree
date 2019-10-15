@@ -754,7 +754,8 @@ func statNode(res *MTnode) {
 	p := res.Path()
 	if fi, err := os.Lstat(p); err == nil {
 		res.mtimeNsecs = fi.ModTime().UnixNano()
-		// res.size = fi.Size() // Note that this is filled in by digest
+		res.size = fi.Size() // Note that this is filled in by digest, but
+		// it's required for caching to work.
 	}
 	// FIXME: If it's wanted, fill in uid/etc.
 }
@@ -832,7 +833,7 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 	}
 	if oldRes.size != res.size {
 		if dbgCache {
-			fmt.Println("JDBG:", "!migrate", "size", p)
+			fmt.Println("JDBG:", "!migrate", "size", p, oldRes.size, res.size)
 		}
 		return
 	}
@@ -1648,13 +1649,13 @@ func main() {
 	case cmdList:
 		fallthrough
 	case cmdTree:
+		// FIXME: This breaks caching now ... don't do this if we have .mtree
 		// This is a hack, but eh.
-		calcChecksumKinds = []string{calcChecksumKindPrimary}
+		//		calcChecksumKinds = []string{calcChecksumKindPrimary}
 
 	default:
 	}
 
-	// FIXME: Using flagFast is a massive hack here. Add caching first ;)
 	cachingData := !flagFast
 
 	usageExitCode := 1
