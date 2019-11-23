@@ -14,16 +14,20 @@ import (
 	roc "github.com/james-antill/rename-on-close"
 )
 
+func storeNodeType(r *MTnode) byte {
+	if r.IsSymlink() {
+		return 'l'
+	} else if r.IsDir() {
+		return 'd'
+	} else {
+		return 'f'
+	}
+}
+
 func storeWriteFileNode(iow io.Writer, r *MTnode) {
 	fn := r.Path()
 
-	if r.IsSymlink() {
-		fmt.Fprintf(iow, "P: l %d %s\n", len(fn), fn)
-	} else if r.IsDir() {
-		fmt.Fprintf(iow, "P: d %d %s\n", len(fn), fn)
-	} else {
-		fmt.Fprintf(iow, "P: f %d %s\n", len(fn), fn)
-	}
+	fmt.Fprintf(iow, "P: %c %d %s\n", storeNodeType(r), len(fn), fn)
 
 	for _, csum := range calcChecksumKinds {
 		fmt.Fprintf(iow, "C-%s: %s\n", csum, b2s(r.Checksum(csum)))

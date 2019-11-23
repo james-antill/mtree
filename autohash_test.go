@@ -38,3 +38,14 @@ func TestAutoHashes(t *testing.T) {
 	}
 
 }
+
+func TestLenBytes(t *testing.T) {
+	for i := range validChecksumKinds {
+		kind := validChecksumKinds[i]
+		chk := chkNew(kind)
+		if chk.Size() != chkSize(kind) {
+			t.Errorf("chkLenBytes not equl(%s):\n tst=<%d>\n got <%d>\n",
+				kind, chk.Size(), chkSize(kind))
+		}
+	}
+}

@@ -103,6 +103,64 @@ func data2csum(csum string, data []byte) []byte {
 	}
 }
 
+// chkSize is the size in bytes returned by the checksum, double for hex.
+func chkSize(csum string) int {
+	switch csum {
+	case "md5":
+		return 16
+	case "sha1":
+		return 20
+
+	case "sha224":
+		return 28
+	case "sha256":
+		return 32
+	case "sha384":
+		return 48
+	case "sha512":
+		return 64
+	case "sha512-224":
+		return 28
+	case "sha512-256":
+		return 32
+
+	case "sha3-224":
+		return 28
+	case "sha3-256":
+		return 32
+	case "sha3-384":
+		return 48
+	case "sha3-512":
+		return 64
+
+	case "shake-128-32":
+		return 32
+	case "shake-256-64":
+		return 64
+
+	case "djb2":
+		return 4
+	case "djb2a":
+		return 4
+
+	case "sdbm":
+		return 4
+
+	case "xxh64":
+		return 8
+
+	case "murmur3-32":
+		return 4
+	case "murmur3-64":
+		return 16
+	case "murmur3-128":
+		return 16
+
+	default:
+		panic("Bad csum: " + csum)
+	}
+}
+
 func chkNew(csum string) hash.Hash {
 	switch csum {
 	case "md5":

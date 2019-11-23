@@ -277,6 +277,15 @@ func checksumFile(r *MTnode, kind string) {
 
 const hextable = "0123456789abcdef"
 
+func bytes2hex(dd *bytes.Buffer, data []byte) {
+	//		dd += fmt.Sprintf("%x", data)
+	for _, b := range data {
+		dd.WriteByte(hextable[b>>4])
+		dd.WriteByte(hextable[b&0x0f])
+	}
+
+}
+
 func (r *MTnode) findCsum(kind string) *Checksum {
 	for i := range r.csums {
 		v := &r.csums[i]
@@ -328,6 +337,70 @@ func (r *MTnode) childrenSetupChecksums(kind string, limit int) chan<- *MTnode {
 	return data
 }
 
+const assumeAveNameLen = 12
+const assumeAveNameNumLen = 2 // log10()+1 ... 6 = 1, 66 = 2, 666 = 3, ...
+
+// dirBytesChildren1 to serialize just the name of the data and the checksum.
+func dirBytesChildren1(dd *bytes.Buffer,
+	r *MTnode, kind string) *bytes.Buffer {
+	perChild := assumeAveNameLen
+	perChild++
+	perChild += chkSize(kind) * 2
+	dd.Grow(len(r.children) * perChild)
+
+	for _, child := range r.Children() {
+		dd.WriteString(child.name)
+		dd.WriteByte(' ')
+		chk := child.Checksum(kind)
+		if chk == nil {
+			return nil
+		}
+		bytes2hex(dd, chk)
+		dd.WriteByte('\n')
+	}
+
+	return dd
+}
+
+// dirBytesChildren2 to serialize the type of the node too,
+// so file => symlink transitions change. We also make it parseable.
+func dirBytesChildren2(dd *bytes.Buffer,
+	r *MTnode, kind string) *bytes.Buffer {
+	perChild := assumeAveNameNumLen
+	perChild += assumeAveNameLen
+	perChild += 4
+	perChild += chkSize(kind) * 2
+	dd.Grow(len(r.children) * perChild)
+
+	for _, child := range r.Children() {
+		dd.WriteString(strconv.Itoa(len(child.name)))
+		dd.WriteByte(' ')
+		dd.WriteString(child.name)
+		dd.WriteByte(' ')
+		dd.WriteByte(storeNodeType(child))
+		dd.WriteByte(' ')
+		chk := child.Checksum(kind)
+		if chk == nil {
+			return nil
+		}
+		bytes2hex(dd, chk)
+		dd.WriteByte('\n')
+	}
+
+	return dd
+}
+
+const originalSerialize = true
+
+func dirBytesChildren(dd *bytes.Buffer,
+	r *MTnode, kind string) *bytes.Buffer {
+	if originalSerialize {
+		return dirBytesChildren1(dd, r, kind)
+	}
+
+	return dirBytesChildren2(dd, r, kind)
+}
+
 // Checksum gives the hash of the directory and all children
 func (r *MTnode) Checksum(kind string) []byte {
 	if kind == "" {
@@ -367,25 +440,12 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// Is a directory...
 	// merge all the data from all the children...
 
-	// For large sets this can be slow, so parallel ftw.
-	r.childrenSetupChecksums(kind, 0)
+	// For large sets this can be slow, so parallel when we need to.
+	// FIXME: This is a bit spewy in some cases: cached files, deep dirs.
+	// r.childrenSetupChecksums(kind, 0)
 
 	var dd bytes.Buffer
-	for _, child := range r.Children() {
-		dd.WriteString(child.name)
-		dd.WriteByte(' ')
-		chk := child.Checksum(kind)
-		if chk == nil {
-			return nil
-		}
-		//		dd += fmt.Sprintf("%x", chk)
-		for _, b := range chk {
-			dd.WriteByte(hextable[b>>4])
-			dd.WriteByte(hextable[b&0x0f])
-		}
-		dd.WriteByte('\n')
-	}
-
+	dirBytesChildren(&dd, r, kind)
 	c := data2csum(kind, dd.Bytes())
 	r.csums = append(r.csums, Checksum{kind, c})
 	// Recurse so we know it's cached...
