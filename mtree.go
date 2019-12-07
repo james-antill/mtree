@@ -547,9 +547,13 @@ func (r *MTnode) Path() string {
 	return b.String()
 }
 
+func isSymlink(mode os.FileMode) bool {
+	return mode&os.ModeSymlink != 0
+}
+
 func newRes(dres *MTnode, base string, mode os.FileMode) *MTnode {
 	res := &MTnode{name: base, parent: dres,
-		isDir: mode.IsDir(), isSymlink: mode&os.ModeSymlink != 0}
+		isDir: mode.IsDir(), isSymlink: isSymlink(mode)}
 	if dres != nil && res.name == "/" {
 		panic(res)
 	}
