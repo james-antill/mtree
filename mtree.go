@@ -1116,7 +1116,7 @@ func MtreePath(root string, needCachingData, filter,
 	}
 
 	// Check whether the Walk failed.
-	if err := <-errc; err != nil { // HLerrc
+	if err := <-errc; err != nil {
 		return nil, err
 	}
 

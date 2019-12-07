@@ -135,15 +135,14 @@ func dlFile(mtr *MTRoot, dlpath, rfname string) error {
 	case "http":
 		resp, err := http.Get(mtr.Conf.Remote.URL + "/" + rfname)
 		if err != nil {
-			return fmt.Errorf("http.Open: %v\n", err)
-			return err
+			return fmt.Errorf("http.Open: %v", err)
 		}
 		defer resp.Body.Close()
 
 		// bar := p.AddBarDef(size, name, decor.Unit_KiB)
 		//        reader := bar.ProxyReader(resp.Body)
 		if _, err := io.Copy(fo, resp.Body); err != nil {
-			return fmt.Errorf("http.Copy: %v\n", err)
+			return fmt.Errorf("http.Copy: %v", err)
 		}
 
 	case "sftp":
@@ -153,12 +152,12 @@ func dlFile(mtr *MTRoot, dlpath, rfname string) error {
 		rfname = purl.Path[1:] + "/" + rfname
 		r, err := crfs.Open(rfname)
 		if err != nil {
-			return fmt.Errorf("sftp.Open(%s): %v\n", rfname, err)
+			return fmt.Errorf("sftp.Open(%s): %v", rfname, err)
 		}
 		defer r.Close()
 
 		if _, err := io.Copy(fo, r); err != nil {
-			return fmt.Errorf("sftp.Copy(%s): %v\n", rfname, err)
+			return fmt.Errorf("sftp.Copy(%s): %v", rfname, err)
 		}
 	}
 
