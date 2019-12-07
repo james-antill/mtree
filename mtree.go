@@ -18,7 +18,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/karrick/godirwalk"
+	// "github.com/saracen/walker"
+	walker "github.com/karrick/godirwalk"
 
 	"github.com/james-antill/mpb"
 	"github.com/james-antill/mpb/decor"
@@ -764,44 +765,62 @@ func walkFiles(wroot string, qlen int,
 
 		pparent := ""
 		ppent := root
-		errc <- godirwalk.Walk(wroot, &godirwalk.Options{
-			Unsorted: true, // faster, yet non-deterministic enumeration
-			Callback: func(p string, de *godirwalk.Dirent) error {
-				mode := de
-				name := de.Name()
+		nodeCB := func(p string, de *walker.Dirent) error {
+			mode := de
+			name := de.Name()
+			//		var mux sync.Mutex
+			//		nodeCB := func(p string, fi os.FileInfo) error {
+			//			mux.Lock()
+			//			defer mux.Unlock()
 
-				if filter && filterName(name) {
-					if mode.IsDir() {
-						return filepath.SkipDir
-					}
-					return nil
+			//			mode := fi.Mode()
+			//			name := fi.Name()
+
+			if filter && filterName(name) {
+				if mode.IsDir() {
+					return filepath.SkipDir
 				}
-
-				if mode.IsSymlink() { // Due to windows symlink+dir
-				} else if mode.IsDir() { // Because of empty dirs.
-					// ppent, pparent = ensureParentDir(root, p+"/.", pparent, ppent)
-					ensureDir(root, p)
-					return nil
-				} else if !mode.IsRegular() {
-					return nil
-				}
-
-				ppent, pparent = ensureParentDir(root, p, pparent, ppent)
-				res := newRes(ppent, name, mode.ModeType())
-
-				nodes <- res
-				//				select {
-				//				case nodes <- res:
-				//				case <-done:
-				//					return errors.New("walk canceled")
-				//				}
 				return nil
-			},
-			ErrorCallback: func(p string, e error) godirwalk.ErrorAction {
-				ensureParentDir(root, p, pparent, ppent)
-				fmt.Fprintln(os.Stderr, e)
-				return godirwalk.SkipNode
-			},
+			}
+
+			if mode.IsSymlink() { // Due to windows symlink+dir
+			} else if mode.IsDir() { // Because of empty dirs.
+				// ppent, pparent = ensureParentDir(root, p+"/.", pparent, ppent)
+				ensureDir(root, p)
+				return nil
+			} else if !mode.IsRegular() {
+				return nil
+			}
+
+			ppent, pparent = ensureParentDir(root, p, pparent, ppent)
+			// ppent, pparent = ensureParentDir(root, p, "", root)
+			res := newRes(ppent, name, mode.ModeType())
+
+			nodes <- res
+			//				select {
+			//				case nodes <- res:
+			//				case <-done:
+			//					return errors.New("walk canceled")
+			//				}
+			return nil
+		}
+
+		errCB := func(p string, e error) walker.ErrorAction {
+			//		errCB := func(p string, e error) error {
+			ensureParentDir(root, p, pparent, ppent)
+			fmt.Fprintln(os.Stderr, e)
+			return walker.SkipNode
+			//			return nil
+		}
+
+		// Walker
+		// errc <- walker.Walk(wroot, nodeCB, walker.WithErrorCallback(errCB))
+
+		// Godirwalk
+		errc <- walker.Walk(wroot, &walker.Options{
+			Unsorted:      true, // faster, yet non-deterministic enumeration
+			Callback:      nodeCB,
+			ErrorCallback: errCB,
 			//  We can't do this because we don't know when the checksum workers
 			// will be finished with the child nodes.
 			//			PostChildrenCallback: func(p string, de *godirwalk.Dirent) error {
