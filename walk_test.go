@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"sync"
 	"testing"
 )
 
@@ -18,41 +17,67 @@ func setupDirs(t *testing.T, prefix string) func() {
 		t.Errorf("rmpath1(%s) error: %v\n", prefix, err)
 	}
 
-	var wg sync.WaitGroup
+	limit := 32
+	sem := make(chan int, limit)
 
 	for i := 0; i < tstDirMax; i++ {
 		dname := fmt.Sprintf("%s/%04d", prefix, i)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if err := os.MkdirAll(dname, 0755); err != nil {
-				t.Errorf("mkpath(%s) error: %v\n", dname, err)
-			}
+		if err := os.MkdirAll(dname, 0755); err != nil {
+			t.Errorf("mkpath(%s) error: %v\n", dname, err)
+		}
 
-			for j := 0; j < tstFileMax; j++ {
-				fname := fmt.Sprintf("%s/i%d-j%04d", dname, i, j)
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					if err := ioutil.WriteFile(fname, []byte(fname),
-						0777); err != nil {
-						t.Errorf("writefile(%s) error: %v\n", fname, err)
-					}
-				}()
-			}
-		}()
+		for j := 0; j < tstFileMax; j++ {
+			fname := fmt.Sprintf("%s/i%d-j%04d", dname, i, j)
+
+			sem <- 0
+			go func(j int) {
+				defer func() { <-sem }()
+
+				if err := ioutil.WriteFile(fname, []byte(fname),
+					0777); err != nil {
+					t.Errorf("writefile(%s) error: %v\n", fname, err)
+				}
+			}(j)
+		}
 	}
 
-	wg.Wait()
+	for i := 0; i < limit; i++ {
+		sem <- 0
+	}
+	close(sem)
 
 	return func() {
 		if !tstCleanup {
 			return
 		}
 
-		if err := os.RemoveAll(prefix); err != nil {
-			t.Errorf("rmpath2(%s) error: %v\n", prefix, err)
+		sem := make(chan int, limit)
+
+		for i := 0; i < tstDirMax; i++ {
+			dname := fmt.Sprintf("%s/%04d", prefix, i)
+
+			for j := 0; j < tstFileMax; j++ {
+				fname := fmt.Sprintf("%s/i%d-j%04d", dname, i, j)
+
+				sem <- 0
+				go func(j int) {
+					defer func() { <-sem }()
+
+					if err := os.Remove(fname); err != nil {
+						t.Errorf("rmfile(%s) error: %v\n", fname, err)
+					}
+				}(j)
+			}
+
+			if err := os.Remove(dname); err != nil {
+				t.Errorf("rmdir(%s) error: %v\n", dname, err)
+			}
 		}
+
+		for i := 0; i < limit; i++ {
+			sem <- 0
+		}
+		close(sem)
 	}
 }
 
