@@ -204,6 +204,9 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 				return nil, fmt.Errorf("Corrupt mtree file: %s near: %s",
 					mfname, txt)
 			}
+			if cur.IsDir() {
+				continue // FIXME: Have the directory size re-resolve.
+			}
 			cur.size = size
 
 		case strings.HasPrefix(txt, "C-"): // Checksums
