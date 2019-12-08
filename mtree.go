@@ -447,7 +447,9 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// r.childrenSetupChecksums(kind, 0)
 
 	var dd bytes.Buffer
-	dirBytesChildren(&dd, r, kind)
+	if dirBytesChildren(&dd, r, kind) == nil {
+		return nil
+	}
 	c := data2csum(kind, dd.Bytes())
 	r.csums = append(r.csums, Checksum{kind, c})
 	// Recurse so we know it's cached...
