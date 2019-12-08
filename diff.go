@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 )
 
 func iterMTd(r *MTnode, out chan<- *MTnode) {
@@ -115,22 +116,22 @@ func cbDiff(r1, r2 *MTnode, cb func(*MTnode, cbType, ...*MTnode)) {
 	}
 }
 
-func prntDiff(r1, r2 *MTnode, tree, ui bool) {
+func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
 	cbDiff(r1, r2, func(n *MTnode, cbT cbType, on ...*MTnode) {
 		switch cbT {
 		case cbAdd:
-			prntDiffMtree(n, tree, ui, "+", n.Size())
+			prntDiffMtree(w, n, tree, ui, "+", n.Size())
 		case cbDel:
-			prntDiffMtree(n, tree, ui, "-", n.Size())
+			prntDiffMtree(w, n, tree, ui, "-", n.Size())
 		case cbMod:
 			if false {
-				prntListMtree(on[0], tree, ui, "-")
-				prntListMtree(n, tree, ui, "+")
+				prntListMtree(w, on[0], tree, ui, "-")
+				prntListMtree(w, n, tree, ui, "+")
 			} else {
-				prntDiffMtree(n, tree, ui, "!", on[0].Size())
+				prntDiffMtree(w, n, tree, ui, "!", on[0].Size())
 			}
 		case cbEqual:
-			prntDiffMtree(n, tree, ui, " ", n.Size())
+			prntDiffMtree(w, n, tree, ui, " ", n.Size())
 		}
 	})
 }

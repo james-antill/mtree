@@ -1337,7 +1337,7 @@ func uiPath(r *MTnode, tree bool) string {
 	return fn
 }
 
-func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
+func prntListMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string) {
 	chksum := uiChecksum(r, ui)
 
 	fn := uiPath(r, tree)
@@ -1346,10 +1346,11 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 		fn = fn + "/"
 	}
 
-	fmt.Printf("%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
+	fmt.Fprintf(w, "%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
 }
 
-func prntDiffMtree(r *MTnode, tree, ui bool, sizePrefix string, osize int64) {
+func prntDiffMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string,
+	osize int64) {
 	chksum := uiChecksum(r, ui)
 
 	fn := uiPath(r, tree)
@@ -1365,21 +1366,21 @@ func prntDiffMtree(r *MTnode, tree, ui bool, sizePrefix string, osize int64) {
 
 	nsize := r.Size()
 	if nsize == osize {
-		fmt.Printf("%s %s%s  %s%s\n", chksum, sizePrefix, _muinb(ui, nsize),
+		fmt.Fprintf(w, "%s %s%s  %s%s\n", chksum, sizePrefix, _muinb(ui, nsize),
 			dsize, fn)
 	} else if nsize >= osize {
-		fmt.Printf("%s %s%s+%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
+		fmt.Fprintf(w, "%s %s%s+%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
 			_muinb(ui, nsize-osize), fn)
 	} else {
-		fmt.Printf("%s %s%s-%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
+		fmt.Fprintf(w, "%s %s%s-%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
 			_muinb(ui, osize-nsize), fn)
 	}
 }
 
-func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
+func prntListMtreed(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string) {
 	leafOnly := false
 	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
-		prntListMtree(r, tree, ui, sizePrefix)
+		prntListMtree(w, r, tree, ui, sizePrefix)
 	}
 
 	if !r.IsDir() {
@@ -1387,31 +1388,32 @@ func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {
 	}
 
 	for _, c := range r.Children() {
-		prntListMtreed(c, tree, ui, sizePrefix)
+		prntListMtreed(w, c, tree, ui, sizePrefix)
 	}
 }
 
 // FIXME: This doesn't do any caching, Eg. Num() and LatestModTime()
-func prntInfoMtreeIn(node *MTnode, cachingData, ui bool,
+func prntInfoMtreeIn(w io.Writer, node *MTnode, cachingData, ui bool,
 	checksumKindMaxLen int) {
-	fmt.Println("Name:", node.Path())
+	fmt.Fprintln(w, "Name:", node.Path())
 	// p := message.NewPrinter(message.MatchLanguage("en"))
 	// p.Println("  Num     :", m.Num())
 	if node.IsDir() {
-		fmt.Println("  Num     :", _muin(ui, int64(node.Num())))
+		fmt.Fprintln(w, "  Num     :", _muin(ui, int64(node.Num())))
 	}
-	fmt.Println("  Size    :", _muinb(ui, node.Size()))
+	fmt.Fprintln(w, "  Size    :", _muinb(ui, node.Size()))
 	if cachingData {
 		timeFmt := time.RFC3339Nano
 		if ui { // Similar, but with spaces...
 			timeFmt = "2006-01-02 15:04:05.999999999 Z07:00"
 		}
-		fmt.Println("  Mod Time:", node.LatestModTime().Format(timeFmt))
+		fmt.Fprintln(w, "  Mod Time:", node.LatestModTime().Format(timeFmt))
 	}
-	for _, csum := range calcChecksumKinds {
+	for _, csumo := range node.csums {
+		csum := csumo.Kind
 		// Cache dir. checksum so it doesn't stop in the middle of the line
 		node.Checksum(csum)
-		fmt.Printf("    %-*s: %s\n", 4+checksumKindMaxLen, "Chk-"+csum,
+		fmt.Fprintf(w, "    %-*s: %s\n", 4+checksumKindMaxLen, "Chk-"+csum,
 			b2s(node.Checksum(csum)))
 	}
 }
@@ -1426,15 +1428,15 @@ func prntMaxChecsumKindLen() int {
 	return mlen
 }
 
-func prntInfoMtree(node *MTnode, cachingData, ui bool) {
-	prntInfoMtreeIn(node, cachingData, ui, prntMaxChecsumKindLen())
+func prntInfoMtree(w io.Writer, node *MTnode, cachingData, ui bool) {
+	prntInfoMtreeIn(w, node, cachingData, ui, prntMaxChecsumKindLen())
 }
 
-func prntInfoMtreedIn(node *MTnode, cachingData, ui bool,
+func prntInfoMtreedIn(w io.Writer, node *MTnode, cachingData, ui bool,
 	checksumKindMaxLen int) {
 	leafOnly := false
 	if !leafOnly || !node.IsDir() || len(node.children) == 0 {
-		prntInfoMtreeIn(node, cachingData, ui, checksumKindMaxLen)
+		prntInfoMtreeIn(w, node, cachingData, ui, checksumKindMaxLen)
 	}
 
 	if !node.IsDir() {
@@ -1442,12 +1444,12 @@ func prntInfoMtreedIn(node *MTnode, cachingData, ui bool,
 	}
 
 	for _, c := range node.Children() {
-		prntInfoMtreedIn(c, cachingData, ui, checksumKindMaxLen)
+		prntInfoMtreedIn(w, c, cachingData, ui, checksumKindMaxLen)
 	}
 }
 
-func prntInfoMtreed(node *MTnode, cachingData, ui bool) {
-	prntInfoMtreedIn(node, cachingData, ui, prntMaxChecsumKindLen())
+func prntInfoMtreed(w io.Writer, node *MTnode, cachingData, ui bool) {
+	prntInfoMtreedIn(w, node, cachingData, ui, prntMaxChecsumKindLen())
 }
 
 func usageCmdEqual() {
@@ -1936,6 +1938,10 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
+		if m.name == "/" { // Old files workaround...
+			m = first(m)
+			m.parent = nil
+		}
 		mtr = &MTRoot{Nodes: m}
 		if cmdID == cmdFile {
 			cmdID = cmdInfo
@@ -2048,21 +2054,25 @@ func main() {
 		mtree = mtr.Nodes
 	}
 
+	// FIXME: Want to start out at line by by line then move to block buffering
+	fow := bufio.NewWriter(os.Stdout) // Fast os.Stdout writer
+	defer fow.Flush()
+
 	switch cmdID {
 	case cmdList:
-		prntListMtreed(mtree, false, flagUI, "")
 		validChecksumsList(mtree, calcChecksumKinds)
+		prntListMtreed(fow, mtree, false, flagUI, "")
 	case cmdTree:
-		prntListMtreed(mtree, true, flagUI, "")
 		validChecksumsList(mtree, calcChecksumKinds)
+		prntListMtreed(fow, mtree, true, flagUI, "")
 
 	case cmdInfo:
-		prntInfoMtreed(mtree, cachingData, flagUI)
 		validChecksumsList(mtree, calcChecksumKinds)
+		prntInfoMtreed(fow, mtree, cachingData, flagUI)
 
 	case cmdSummary:
-		prntInfoMtree(mtree, cachingData, flagUI)
 		validChecksumsList(mtree, calcChecksumKinds)
+		prntInfoMtree(fow, mtree, cachingData, flagUI)
 
 	case cmdEqual:
 		if !validChecksumsList(mtree, calcChecksumKinds) {
@@ -2154,7 +2164,7 @@ func main() {
 		if omtree != nil && cmpChksumEq(omtree, mtree) {
 			fmt.Println("Nothing changed:")
 			// prntListMtree(mtree, false, flagUI, "")
-			prntInfoMtree(mtree, cachingData, flagUI)
+			prntInfoMtree(fow, mtree, cachingData, flagUI)
 			break
 		}
 
@@ -2218,7 +2228,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		prntInfoMtree(mtree, cachingData, flagUI)
+		prntInfoMtree(fow, mtree, cachingData, flagUI)
 
 	case cmdInitialize:
 		mkpathMust(args[0], ".mtree")
@@ -2235,7 +2245,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		prntDiff(omtree, mtree, false, flagUI)
+		prntDiff(fow, omtree, mtree, false, flagUI)
 
 	case cmdPull:
 		if !validChecksumsList(mtree, calcChecksumKinds) {
