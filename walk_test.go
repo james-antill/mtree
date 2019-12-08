@@ -12,10 +12,12 @@ const tstCleanup = false
 const tstDirMax = 128
 const tstFileMax = 128
 
-func setupDirs(t *testing.T, prefix string) func() {
+func setupDirs(t *testing.T, prefix string) (int64, func()) {
 	if err := os.RemoveAll(prefix); err != nil {
 		t.Errorf("rmpath1(%s) error: %v\n", prefix, err)
 	}
+
+	var size int64
 
 	limit := 32
 	sem := make(chan int, limit)
@@ -28,6 +30,7 @@ func setupDirs(t *testing.T, prefix string) func() {
 
 		for j := 0; j < tstFileMax; j++ {
 			fname := fmt.Sprintf("%s/i%d-j%04d", dname, i, j)
+			size += int64(len(fname))
 
 			sem <- 0
 			go func(j int) {
@@ -46,7 +49,7 @@ func setupDirs(t *testing.T, prefix string) func() {
 	}
 	close(sem)
 
-	return func() {
+	return size, func() {
 		if !tstCleanup {
 			return
 		}
@@ -84,7 +87,7 @@ func setupDirs(t *testing.T, prefix string) func() {
 func TestWalk(t *testing.T) {
 	trootPath := "testdata/foo"
 
-	destroyDirs := setupDirs(t, trootPath)
+	expectedSize, destroyDirs := setupDirs(t, trootPath)
 	defer destroyDirs()
 
 	numDigesters := 16
@@ -98,6 +101,7 @@ func TestWalk(t *testing.T) {
 	rootNode, nodes, errc := walkFiles(rootPath, numDigesters, filterNodes)
 	nodes = statNodes(nodes, numDigesters)
 	// 		nodes = cacheNodes(nodes, numDigesters, cache, root+"/")
+	//	nodes = digestNodes(nodes, numDigesters, 0, "")
 
 	for r := range nodes {
 		if r.err != nil {
@@ -111,11 +115,28 @@ func TestWalk(t *testing.T) {
 	}
 
 	ret := ensureDir(rootNode, rootPath)
+	ret.Checksum("md5") // Need to do it before we alter path.
 	ret.parent = nil
 
 	expectedNumNodes := tstDirMax * (tstFileMax + 1)
 	if ret.Num() != expectedNumNodes {
 		t.Errorf("bad num: %v\n got <%v>\n",
 			expectedNumNodes, ret.Num())
+	}
+
+	if ret.Size() != expectedSize {
+		t.Errorf("bad sz: %v\n got <%v>\n",
+			expectedSize, ret.Size())
+	}
+
+	if tstDirMax != 128 || tstFileMax != 128 {
+		return
+	}
+
+	md5 := fmt.Sprintf("%x", ret.Checksum("md5"))
+	val := "1e18a81250da9bd08376afb21deb8c97"
+	if md5 != val {
+		t.Errorf("bad md5: %v\n got <%v>\n",
+			val, md5)
 	}
 }
