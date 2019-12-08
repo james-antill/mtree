@@ -119,18 +119,18 @@ func prntDiff(r1, r2 *MTnode, tree, ui bool) {
 	cbDiff(r1, r2, func(n *MTnode, cbT cbType, on ...*MTnode) {
 		switch cbT {
 		case cbAdd:
-			prntListMtree(n, tree, ui, "+")
+			prntDiffMtree(n, tree, ui, "+", n.Size())
 		case cbDel:
-			prntListMtree(n, tree, ui, "-")
+			prntDiffMtree(n, tree, ui, "-", n.Size())
 		case cbMod:
 			if false {
-				prntListMtree(n, tree, ui, "-")
-				prntListMtree(on[0], tree, ui, "+")
+				prntListMtree(on[0], tree, ui, "-")
+				prntListMtree(n, tree, ui, "+")
 			} else {
-				prntListMtree(n, tree, ui, "!")
+				prntDiffMtree(n, tree, ui, "!", on[0].Size())
 			}
 		case cbEqual:
-			prntListMtree(n, tree, ui, " ")
+			prntDiffMtree(n, tree, ui, " ", n.Size())
 		}
 	})
 }

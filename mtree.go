@@ -1301,9 +1301,9 @@ func b2s(b []byte) string {
 	return fmt.Sprintf("%x", b)
 }
 
-// FIXME: This doesn't do any caching, Eg. Size()
-func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
+func uiChecksum(r *MTnode, ui bool) string {
 	chksum := b2s(r.Checksum(calcChecksumKindPrimary))
+
 	if ui {
 		uilen := uiChecksumLen
 		if uilen > len(chksum) {
@@ -1313,23 +1313,63 @@ func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
 			chksum = chksum[:uiChecksumLen]
 		}
 	}
+	return chksum
+}
 
-	fn := r.Path()
-
-	if tree {
-		depth := r.Depth()
-		if depth == 0 {
-			fn = r.name
-		} else {
-			indent := strings.Repeat(" |  ", depth-1) + " \\_ "
-			fn = indent + r.name
-		}
+func uiPath(r *MTnode, tree bool) string {
+	if !tree {
+		return r.Path()
 	}
+
+	var fn string
+	depth := r.Depth()
+	if depth == 0 {
+		fn = r.name
+	} else {
+		indent := strings.Repeat(" |  ", depth-1) + " \\_ "
+		fn = indent + r.name
+	}
+
+	return fn
+}
+
+func prntListMtree(r *MTnode, tree, ui bool, sizePrefix string) {
+	chksum := uiChecksum(r, ui)
+
+	fn := uiPath(r, tree)
+
 	if ui && r.IsDir() && r.parent != nil {
 		fn = fn + "/"
 	}
 
 	fmt.Printf("%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
+}
+
+func prntDiffMtree(r *MTnode, tree, ui bool, sizePrefix string, osize int64) {
+	chksum := uiChecksum(r, ui)
+
+	fn := uiPath(r, tree)
+
+	if ui && r.IsDir() && r.parent != nil {
+		fn = fn + "/"
+	}
+
+	dsize := " "
+	if ui {
+		dsize = "     "
+	}
+
+	nsize := r.Size()
+	if nsize == osize {
+		fmt.Printf("%s %s%s  %s%s\n", chksum, sizePrefix, _muinb(ui, nsize),
+			dsize, fn)
+	} else if nsize >= osize {
+		fmt.Printf("%s %s%s+%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
+			_muinb(ui, nsize-osize), fn)
+	} else {
+		fmt.Printf("%s %s%s-%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
+			_muinb(ui, osize-nsize), fn)
+	}
 }
 
 func prntListMtreed(r *MTnode, tree, ui bool, sizePrefix string) {

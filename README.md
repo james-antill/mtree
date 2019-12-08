@@ -10,6 +10,10 @@ Big bugs
 
 No real module API atm. -- will happen soon.
 
+.mtree/cache problems when empty and using offsets?
+
+weird blankcsum issue
+
 misc bugs/etc.
 ==============
 
@@ -23,6 +27,9 @@ Not enough tests. never?
 
 metadata dir?
 
+cache by file?
+    cache in ~/.cache/ for "large" files?
+
 snap creates .gz/.xz files?
     https://github.com/klauspost/compress/tree/master/zstd#zstd
     save just files more for HEAD?
@@ -30,5 +37,16 @@ snap creates .gz/.xz files?
 hardlinking ... on discovery and creating them
     reflinks
 
-split file + package
+admin/debug sub command
+    show path/.mtree offsets etc.
+    load file
+
+Create/validate SHA256SUM / etc. files?
+
+history sub command
+    local
+    remote
+    diffs between versions
+
+split cmd + package
 better progress
