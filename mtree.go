@@ -136,6 +136,7 @@ func (r *MTnode) Children() []*MTnode {
 func (r *MTnode) Reset() {
 	r.sorted = false
 	r.csums = nil
+	r.size = 0
 	if r.parent != nil {
 		r.parent.Reset()
 	}
@@ -457,9 +458,16 @@ func (r *MTnode) Checksum(kind string) []byte {
 // Size gives the size of the directory and all children, not overflow safe.
 func (r *MTnode) Size() int64 {
 	num := r.size
+	if num > 0 {
+		return num
+	}
+
 	for _, child := range r.children {
 		num += child.Size()
 	}
+
+	r.size = num // Cache directory sizes...
+
 	return num
 }
 
