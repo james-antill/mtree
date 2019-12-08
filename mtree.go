@@ -1002,7 +1002,9 @@ func digest(res *MTnode, dbar *mpb.Bar) {
 	}
 
 	if !res.IsDir() {
-		res.Checksum("")
+		for _, csum := range calcChecksumKinds {
+			res.Checksum(csum)
+		}
 	}
 
 	if dbar != nil {
@@ -1638,6 +1640,18 @@ func mkpathMust(r, p string) {
 	}
 }
 
+func validChecksumsList(mtree *MTnode, csumKinds []string) bool {
+	checksumsAllWorked := true
+	for _, csum := range csumKinds {
+		if d := mtree.Checksum(csum); d == nil {
+			fmt.Fprintln(os.Stderr, "Couldn't generate .mtree for:", csum)
+			checksumsAllWorked = false
+		}
+	}
+
+	return checksumsAllWorked
+}
+
 func setupConfig(mtr *MTRoot, path string) bool {
 	dmt, off := findDotMtree(path)
 	if dmt == "" {
@@ -2035,16 +2049,24 @@ func main() {
 	switch cmdID {
 	case cmdList:
 		prntListMtreed(mtree, false, flagUI, "")
+		validChecksumsList(mtree, calcChecksumKinds)
 	case cmdTree:
 		prntListMtreed(mtree, true, flagUI, "")
+		validChecksumsList(mtree, calcChecksumKinds)
 
 	case cmdInfo:
 		prntInfoMtreed(mtree, cachingData, flagUI)
+		validChecksumsList(mtree, calcChecksumKinds)
 
 	case cmdSummary:
 		prntInfoMtree(mtree, cachingData, flagUI)
+		validChecksumsList(mtree, calcChecksumKinds)
 
 	case cmdEqual:
+		if !validChecksumsList(mtree, calcChecksumKinds) {
+			os.Exit(1)
+		}
+
 		chkArgs := args[1:]
 		chkDone := make([]bool, len(chkArgs))
 		failedChecksum := false
@@ -2123,9 +2145,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		// Make sure the dir. checksums are valid.
-		for _, csum := range calcChecksumKinds {
-			mtree.Checksum(csum)
+		if !validChecksumsList(mtree, calcChecksumKinds) {
+			os.Exit(1)
 		}
 
 		if omtree != nil && cmpChksumEq(omtree, mtree) {
@@ -2208,14 +2229,17 @@ func main() {
 	case cmdRdiff:
 		fallthrough
 	case cmdDifference:
-		// Make sure the dir. checksums are valid.
-		for _, csum := range calcChecksumKinds {
-			mtree.Checksum(csum)
+		if !validChecksumsList(mtree, calcChecksumKinds) {
+			os.Exit(1)
 		}
 
 		prntDiff(omtree, mtree, false, flagUI)
 
 	case cmdPull:
+		if !validChecksumsList(mtree, calcChecksumKinds) {
+			os.Exit(1)
+		}
+
 		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
 			fmt.Fprintln(os.Stderr, "No .mtree/config.")
 			os.Exit(1)
@@ -2265,6 +2289,10 @@ func main() {
 	case cmdSyncDel: // Download missing/changed files, and delete others
 		fallthrough
 	case cmdSyncMod: // Download missing/changed files
+		if !validChecksumsList(mtree, calcChecksumKinds) {
+			os.Exit(1)
+		}
+
 		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
 			fmt.Fprintln(os.Stderr, "No .mtree/config.")
 			os.Exit(1)
