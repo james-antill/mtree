@@ -1114,6 +1114,12 @@ type MTRoot struct {
 func MtreePath(root string, needCachingData, filter,
 	progress, needOldSnap bool) (*MTRoot, error) {
 
+	for _, kind := range validChecksumKinds {
+		if !validChecksum(kind) {
+			return nil, fmt.Errorf("Checksum not found: %s", kind)
+		}
+	}
+
 	numDigesters := numCPUDigesters()
 
 	root, err := normPath(root)

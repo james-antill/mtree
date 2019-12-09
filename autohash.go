@@ -226,6 +226,10 @@ var validChecksumKinds = []string{"md5", "sha1",
 	"murmur3-32", "murmur3-64", "murmur3-128"}
 var validChecksumKindsMap = map[string]bool{}
 
+func init() {
+	validChecksum("md5") // setup the map
+}
+
 // validChecksum checks the kind is valid, uses sort.SearchStrings
 func validChecksum(kind string) bool {
 	if !validChecksumKindsMap[kind] {
