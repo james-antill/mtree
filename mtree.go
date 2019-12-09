@@ -1072,6 +1072,7 @@ func first(r *MTnode) *MTnode {
 	return first(r.children[0])
 }
 
+// MTConfRemote is the remote we will pull from
 type MTConfRemote struct {
 	Name string
 	URL  string
@@ -1083,12 +1084,14 @@ type MTConfRemote struct {
 	dlSFTP *sftp.Client
 }
 
+// MTConf is the main configuration for a .mtree
 type MTConf struct {
 	Remote    *MTConfRemote
 	AutoScrub uint // Auto scrub amount in 0.01% units. 0-10000
 	checkSums []string
 }
 
+// MTRoot is the main holder of the nodes from Path(), and the config/etc.
 type MTRoot struct {
 	Nodes          *MTnode
 	Cache          *MTnode
