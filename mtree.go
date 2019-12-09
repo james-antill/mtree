@@ -2168,6 +2168,7 @@ func main() {
 
 	case cmdEqual:
 		if !mtr.validChecksums {
+			fmt.Fprintln(os.Stderr, "Failing due to checksum invalidity.")
 			os.Exit(1)
 		}
 
@@ -2250,6 +2251,7 @@ func main() {
 		}
 
 		if !mtr.validChecksums {
+			fmt.Fprintln(os.Stderr, "Failing due to checksum invalidity.")
 			os.Exit(1)
 		}
 
@@ -2334,6 +2336,7 @@ func main() {
 		fallthrough
 	case cmdDifference:
 		if !mtr.validChecksums {
+			fmt.Fprintln(os.Stderr, "Failing due to checksum invalidity.")
 			os.Exit(1)
 		}
 
@@ -2390,6 +2393,7 @@ func main() {
 		fallthrough
 	case cmdSyncMod: // Download missing/changed files
 		if !mtr.validChecksums {
+			fmt.Fprintln(os.Stderr, "Failing due to checksum invalidity.")
 			os.Exit(1)
 		}
 
