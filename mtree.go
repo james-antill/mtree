@@ -1100,6 +1100,8 @@ type MTRoot struct {
 	DotMtreePath string
 	RootOffset   string
 	Conf         *MTConf
+
+	validChecksums bool
 }
 
 // MtreePath Generate data from FS for root path. Also returns last snapshot,
@@ -1170,6 +1172,8 @@ func MtreePath(root string, needCachingData, filter,
 
 	// Walk to the starting point:
 	ret := ensureDir(rootNode, root)
+
+	retRoot.validChecksums = validChecksumsList(ret, calcChecksumKinds)
 
 	// Blank the full path out at either:
 	if retRoot.LatestSnapshot == nil { // The user supplied path (nearest dir.)
@@ -2121,22 +2125,16 @@ func main() {
 
 	switch cmdID {
 	case cmdList:
-		validChecksumsList(mtree, calcChecksumKinds)
 		prntListMtreed(fow, mtree, false, flagUI, "")
 	case cmdTree:
-		validChecksumsList(mtree, calcChecksumKinds)
 		prntListMtreed(fow, mtree, true, flagUI, "")
-
 	case cmdInfo:
-		validChecksumsList(mtree, calcChecksumKinds)
 		prntInfoMtreed(fow, mtree, cachingData, flagUI)
-
 	case cmdSummary:
-		validChecksumsList(mtree, calcChecksumKinds)
 		prntInfoMtree(fow, mtree, cachingData, flagUI)
 
 	case cmdEqual:
-		if !validChecksumsList(mtree, calcChecksumKinds) {
+		if !mtr.validChecksums {
 			os.Exit(1)
 		}
 
@@ -2218,7 +2216,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		if !validChecksumsList(mtree, calcChecksumKinds) {
+		if !mtr.validChecksums {
 			os.Exit(1)
 		}
 
@@ -2302,14 +2300,14 @@ func main() {
 	case cmdRdiff:
 		fallthrough
 	case cmdDifference:
-		if !validChecksumsList(mtree, calcChecksumKinds) {
+		if !mtr.validChecksums {
 			os.Exit(1)
 		}
 
 		prntDiff(fow, omtree, mtree, false, flagUI)
 
 	case cmdPull:
-		if !validChecksumsList(mtree, calcChecksumKinds) {
+		if !mtr.validChecksums {
 			os.Exit(1)
 		}
 
@@ -2362,7 +2360,7 @@ func main() {
 	case cmdSyncDel: // Download missing/changed files, and delete others
 		fallthrough
 	case cmdSyncMod: // Download missing/changed files
-		if !validChecksumsList(mtree, calcChecksumKinds) {
+		if !mtr.validChecksums {
 			os.Exit(1)
 		}
 
