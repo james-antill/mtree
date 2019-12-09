@@ -2462,6 +2462,8 @@ func main() {
 					return
 				}
 
+				fmt.Printf("  rm %s\n", nPath)
+
 				os.RemoveAll(nPath)
 
 			case cbMod:
