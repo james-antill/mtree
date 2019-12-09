@@ -7,7 +7,6 @@ import (
 	"crypto/sha512"
 	"hash"
 	"io"
-	"sort"
 
 	"github.com/cespare/xxhash"
 	// djb2/djb2a/sdbm
@@ -225,20 +224,16 @@ var validChecksumKinds = []string{"md5", "sha1",
 	// These are the non-crypto "fast" hashes...
 	"djb2", "djb2a", "sdbm", "xxh64",
 	"murmur3-32", "murmur3-64", "murmur3-128"}
-var validChecksumSorted = false
+var validChecksumKindsMap = map[string]bool{}
 
 // validChecksum checks the kind is valid, uses sort.SearchStrings
 func validChecksum(kind string) bool {
-	if !validChecksumSorted {
-		sort.Strings(validChecksumKinds)
-		validChecksumSorted = true
+	if !validChecksumKindsMap[kind] {
+		for _, k := range validChecksumKinds {
+			validChecksumKindsMap[k] = true
+		}
 	}
-
-	i := sort.SearchStrings(validChecksumKinds, kind)
-	if i < len(validChecksumKinds) && validChecksumKinds[i] == kind {
-		return true
-	}
-	return false
+	return validChecksumKindsMap[kind]
 }
 
 type autohash struct {
