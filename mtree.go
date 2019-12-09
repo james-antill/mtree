@@ -1229,6 +1229,7 @@ func MtreePathOrFile(root string, needCachingData, filter,
 	}
 
 	retRoot := &MTRoot{Nodes: m}
+	retRoot.validChecksums = true
 	return retRoot, nil
 }
 
