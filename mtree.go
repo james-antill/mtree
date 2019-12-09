@@ -239,7 +239,7 @@ func checksumSymlink(r *MTnode, kind string) {
 
 	data, err := os.Readlink(path)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		r.err = err
 		data = ""
 	}
 	// r.data = data
@@ -250,10 +250,9 @@ func checksumSymlink(r *MTnode, kind string) {
 		c := data2csum(csum, []byte(data))
 		r.csums = append(r.csums, Checksum{csum, c})
 	}
-
 }
 
-func checksumFile(r *MTnode, kind string) {
+func checksumFile(r *MTnode, kind string) bool {
 	// Currently do all the checksums for files...
 
 	path := r.Path()
@@ -261,7 +260,7 @@ func checksumFile(r *MTnode, kind string) {
 	ior, err := os.Open(path)
 	if err != nil {
 		r.err = err
-		return
+		return false
 	}
 	defer ior.Close()
 
@@ -270,11 +269,13 @@ func checksumFile(r *MTnode, kind string) {
 	written, err := io.Copy(ah, ior)
 	if err != nil {
 		r.err = err
-		return
+		return false
 	}
 	r.size = written
 
 	r.csums = ah.Checksums()
+
+	return true
 }
 
 const hextable = "0123456789abcdef"
@@ -432,7 +433,7 @@ func (r *MTnode) Checksum(kind string) []byte {
 			return nil
 		}
 		checksumFile(r, kind)
-		if r.err != nil {
+		if r.err != nil { // FIXME: Deal with errors within func like symlink?
 			c := data2csum(kind, []byte{})
 			return c
 		}
@@ -1691,11 +1692,43 @@ func mkpathMust(r, p string) {
 	}
 }
 
+func findMissingChecksumKind(mtree *MTnode, kind string) string {
+
+	for _, child := range mtree.Children() {
+		if c := child.findCsum(kind); c != nil {
+			if c.Data == nil {
+				return "data:" + child.Path()
+			}
+			continue
+		}
+		if child.IsDir() {
+			return findMissingChecksumKind(child, kind)
+		}
+
+		return child.Path()
+	}
+
+	ret := ""
+	for _, c := range mtree.csums {
+		ret += ","
+		ret += c.Kind
+	}
+	return mtree.Path() + ret
+}
+
 func validChecksumsList(mtree *MTnode, csumKinds []string) bool {
 	checksumsAllWorked := true
 	for _, csum := range csumKinds {
 		if d := mtree.Checksum(csum); d == nil {
+			d2 := mtree.Checksum(csum)
+			if d2 != nil {
+				fmt.Fprintln(os.Stderr, "Tmp generate problem for:",
+					mtree.Path(), csum)
+				continue
+			}
 			fmt.Fprintln(os.Stderr, "Couldn't generate .mtree for:", csum)
+			fmt.Fprintln(os.Stderr, "  maybe due to:",
+				findMissingChecksumKind(mtree, csum))
 			checksumsAllWorked = false
 		}
 	}
@@ -2111,7 +2144,6 @@ func main() {
 		if err == nil {
 			setupConfig(mtr, dot)
 		}
-
 	}
 
 	var mtree *MTnode
@@ -2307,10 +2339,6 @@ func main() {
 		prntDiff(fow, omtree, mtree, false, flagUI)
 
 	case cmdPull:
-		if !mtr.validChecksums {
-			os.Exit(1)
-		}
-
 		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
 			fmt.Fprintln(os.Stderr, "No .mtree/config.")
 			os.Exit(1)
