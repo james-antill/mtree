@@ -479,7 +479,14 @@ func (r *MTnode) Size() int64 {
 }
 
 func (r *MTnode) latestModNSecs(dirs bool) int64 {
+	if !r.IsDir() {
+		return r.mtimeNsecs
+	}
+
 	var mtime int64
+	if dirs {
+		mtime = r.mtimeNsecs
+	}
 
 	for _, child := range r.children {
 		if child.IsDir() {
@@ -935,7 +942,8 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 
 	if oldRes.mtimeNsecs != res.mtimeNsecs {
 		if dbgCache {
-			fmt.Println("JDBG:", "!migrate", "mtime", p)
+			fmt.Println("JDBG:", "!migrate", "mtime", p,
+				oldRes.mtimeNsecs, res.mtimeNsecs)
 		}
 		return
 	}

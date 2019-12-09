@@ -36,7 +36,7 @@ func storeWriteFileNode(iow io.Writer, r *MTnode) {
 	fmt.Fprintf(iow, "%s %d\n", "S:", r.Size())
 
 	timeFmt := ".000000000"
-	tm := r.LatestModTime()
+	tm := time.Unix(0, r.mtimeNsecs)
 	if tm.Nanosecond() == 0 {
 		fmt.Fprintf(iow, "%s %d\n", "MT:", tm.Unix())
 	} else {
