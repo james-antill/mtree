@@ -473,19 +473,29 @@ func (r *MTnode) Size() int64 {
 	return num
 }
 
-func (r *MTnode) latestModNSecs() int64 {
-	mtime := r.mtimeNsecs
+func (r *MTnode) latestModNSecs(dirs bool) int64 {
+	var mtime int64
+
 	for _, child := range r.children {
-		if lmtime := child.latestModNSecs(); lmtime > mtime {
+		if child.IsDir() {
+			if lmtime := child.latestModNSecs(dirs); lmtime > mtime {
+				mtime = lmtime
+			}
+		} else if lmtime := child.mtimeNsecs; lmtime > mtime {
 			mtime = lmtime
 		}
 	}
 	return mtime
 }
 
-// LatestModTime gives the newest mtime of the directory and all children.
+// LatestModTime gives the latest mtime of the directory and all children.
 func (r *MTnode) LatestModTime() time.Time {
-	return time.Unix(0, r.latestModNSecs())
+	return time.Unix(0, r.latestModNSecs(true))
+}
+
+// LatestModDataTime gives the latest mtime of any file in the directory tree.
+func (r *MTnode) LatestModDataTime() time.Time {
+	return time.Unix(0, r.latestModNSecs(false))
 }
 
 // Depth gives the depth from the root of the child, 0 == root.
@@ -1407,7 +1417,11 @@ func prntInfoMtreeIn(w io.Writer, node *MTnode, cachingData, ui bool,
 		if ui { // Similar, but with spaces...
 			timeFmt = "2006-01-02 15:04:05.999999999 Z07:00"
 		}
-		fmt.Fprintln(w, "  Mod Time:", node.LatestModTime().Format(timeFmt))
+		tm := node.LatestModDataTime()
+		if false { // FIXME: ?
+			tm = node.LatestModTime()
+		}
+		fmt.Fprintln(w, "  Mod Time:", tm.Format(timeFmt))
 	}
 	for _, csumo := range node.csums {
 		csum := csumo.Kind
