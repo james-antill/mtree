@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-const tstCleanup = false
+const tstCleanup = true
 
 const tstDirMax = 128
 const tstFileMax = 128
@@ -71,16 +71,20 @@ func setupDirs(t *testing.T, prefix string) (int64, func()) {
 					}
 				}(j)
 			}
-
-			if err := os.Remove(dname); err != nil {
-				t.Errorf("rmdir(%s) error: %v\n", dname, err)
-			}
 		}
 
 		for i := 0; i < limit; i++ {
 			sem <- 0
 		}
 		close(sem)
+
+		for i := 0; i < tstDirMax; i++ {
+			dname := fmt.Sprintf("%s/%04d", prefix, i)
+
+			if err := os.Remove(dname); err != nil {
+				t.Errorf("rmdir(%s) error: %v\n", dname, err)
+			}
+		}
 	}
 }
 
