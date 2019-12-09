@@ -356,6 +356,7 @@ func dirBytesChildren1(dd *bytes.Buffer,
 		dd.WriteByte(' ')
 		chk := child.Checksum(kind)
 		if chk == nil {
+			fmt.Fprintln(os.Stderr, "Failing chksum due to:", child.Path())
 			return nil
 		}
 		bytes2hex(dd, chk)
@@ -417,6 +418,7 @@ func (r *MTnode) Checksum(kind string) []byte {
 	}
 
 	if !validChecksum(kind) {
+		fmt.Fprintln(os.Stderr, "!valid chksum:", kind, r.Path())
 		return nil
 	}
 
@@ -424,12 +426,14 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// Checksum the data within the file...
 	if r.IsSymlink() {
 		if !r.fsActive {
+			fmt.Fprintln(os.Stderr, "Failing chksum !active:", r.Path())
 			return nil
 		}
 		checksumSymlink(r, kind)
 		return r.Checksum(kind)
 	} else if !r.IsDir() {
 		if !r.fsActive {
+			fmt.Fprintln(os.Stderr, "Failing chksum !active:", r.Path())
 			return nil
 		}
 		checksumFile(r, kind)

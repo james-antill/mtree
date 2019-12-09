@@ -13,7 +13,7 @@ No real module API atm. -- will happen soon.
 
 .mtree/cache problems when empty and using offsets?
 
-weird blankcsum issue
+weird Couldn't generate .mtree for issue
 
 misc bugs/etc.
 ==============
