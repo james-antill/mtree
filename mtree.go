@@ -1527,7 +1527,9 @@ const (
 	cmdInitialize
 	cmdDifference
 	cmdFile
+	cmdFileList
 	cmdFileSum
+	cmdFileTree
 	cmdPull
 	cmdSyncMod
 	cmdSyncDel
@@ -1616,8 +1618,32 @@ func parseCmd(cmd []string) (cmdType, []string) {
 		}
 		return cmdDifference, cmd[1:]
 
-	case "file": // FIXME:
+	case "file": // FIXME: Debugging ... make it a sub-sub command?
+		if len(cmd) > 1 {
+			switch cmd[1] {
+			case "ls":
+				fallthrough
+			case "list":
+				return cmdFileList, cmd[2:]
+
+			case "info":
+				fallthrough
+			case "information":
+				return cmdFile, cmd[2:]
+
+			case "tree":
+				return cmdFileTree, cmd[2:]
+
+			case "summary":
+			case "sum":
+				return cmdFileSum, cmd[2:]
+			}
+		}
 		return cmdFile, cmd[1:]
+	case "file-list":
+		return cmdFileList, cmd[1:]
+	case "file-tree":
+		return cmdFileTree, cmd[1:]
 	case "file-sum": // FIXME:
 		return cmdFileSum, cmd[1:]
 
@@ -1946,6 +1972,10 @@ func main() {
 
 	case cmdFile:
 		fallthrough
+	case cmdFileList:
+		fallthrough
+	case cmdFileTree:
+		fallthrough
 	case cmdFileSum:
 		m, err := MtreeFile(args[0], flagProgress)
 		if err != nil {
@@ -1957,11 +1987,25 @@ func main() {
 			m.parent = nil
 		}
 		mtr = &MTRoot{Nodes: m}
-		if cmdID == cmdFile {
+		switch cmdID {
+		case cmdFile:
 			cmdID = cmdInfo
-		} else {
+		case cmdFileList:
+			cmdID = cmdList
+		case cmdFileSum:
 			cmdID = cmdSummary
+		case cmdFileTree:
+			cmdID = cmdTree
+		default:
+			panic(cmdID)
 		}
+
+		calcChecksumsReset() // Don't validate checksums we don't have...
+		for _, csum := range m.csums {
+			chkKind := csum.Kind
+			calcChecksumsAdd(chkKind)
+		}
+		calcChecksumsDone()
 
 	case cmdRdiff:
 		// FIXME: local vs. upstream
