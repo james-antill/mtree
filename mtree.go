@@ -1887,7 +1887,7 @@ func main() {
 		}
 
 		// Overrides --checksums flag, but it's pointless otherwise.
-		if flagPChecksum != "" {
+		if flagPChecksum != "" && flagPChecksum != pchkDef {
 			fmt.Fprintln(os.Stderr, "Ignoring --checksum flag.")
 		}
 
