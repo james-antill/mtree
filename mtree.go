@@ -356,7 +356,7 @@ func dirBytesChildren1(dd *bytes.Buffer,
 		dd.WriteByte(' ')
 		chk := child.Checksum(kind)
 		if chk == nil {
-			fmt.Fprintln(os.Stderr, "Failing chksum due to:", child.Path())
+			// Don't warn this is used in file loading...
 			return nil
 		}
 		bytes2hex(dd, chk)
@@ -426,14 +426,14 @@ func (r *MTnode) Checksum(kind string) []byte {
 	// Checksum the data within the file...
 	if r.IsSymlink() {
 		if !r.fsActive {
-			fmt.Fprintln(os.Stderr, "Failing chksum !active:", r.Path())
+			// Don't warn this is used in file loading...
 			return nil
 		}
 		checksumSymlink(r, kind)
 		return r.Checksum(kind)
 	} else if !r.IsDir() {
 		if !r.fsActive {
-			fmt.Fprintln(os.Stderr, "Failing chksum !active:", r.Path())
+			// Don't warn this is used in file loading...
 			return nil
 		}
 		checksumFile(r, kind)
@@ -2299,6 +2299,7 @@ func main() {
 
 		// Now we write the mtree of the latest mtree ... :-o
 		rootx2 := rootRes()
+		rootx2.fsActive = true
 		mtreex2l := ensureDir(rootx2, path.Dir(nfn))
 		mtreex2 := mtreex2l.parent
 		mtreex2ll := newRes(mtreex2l, bfn+".mtree", 0)
