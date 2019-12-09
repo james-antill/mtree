@@ -2423,10 +2423,30 @@ func main() {
 		}
 		defer dlClose(mtr)
 
+		// FIXME: Hacky multi downloads...
+		limit := 8
+		sem := make(chan int, limit)
+		defer func() {
+			for i := 0; i < limit; i++ {
+				sem <- 0
+			}
+			fmt.Printf("  done\n")
+			close(sem)
+		}()
+
+		createdDir := true
+
 		// Note that old is remote, and new is local ... this means:
 		//  Delete's need to be downloaded
 		//  Additions need to be deleted (maybe)
-		cbDiff(m, mtree, func(n *MTnode, cbT cbType, on ...*MTnode) {
+		cbDownloader := func(n *MTnode, cbT cbType, on ...*MTnode) {
+
+			nPath := n.Path()
+			fdir := strings.IndexByte(nPath, '/')
+			if fdir == -1 {
+				return
+			}
+			nPath = nPath[fdir+1:]
 
 			switch cbT {
 			case cbEqual:
@@ -2437,7 +2457,7 @@ func main() {
 					return
 				}
 
-				os.RemoveAll(n.Path())
+				os.RemoveAll(nPath)
 
 			case cbMod:
 				if n.IsDir() {
@@ -2449,23 +2469,51 @@ func main() {
 				}
 				fallthrough
 			case cbDel:
+
 				if n.IsDir() {
-					mkpathMust(n.Path(), "")
+					mkpathMust(nPath, "")
+					createdDir = true
 					return
 				}
 
-				rpath := n.Path()
-				fdir := strings.IndexByte(rpath, '/')
-				rpath = rpath[fdir+1:]
-				lpath := path.Dir(rpath)
+				lpath := path.Dir(nPath)
 
-				fmt.Printf("  dl %s\n", rpath)
-				if err := dlFile(mtr, lpath, rpath); err != nil {
-					fmt.Fprintln(os.Stderr, "remote mtree:", err)
-					os.Exit(1)
-				}
+				fmt.Printf("  dl %s\n", nPath)
+
+				sem <- 0
+				go func() {
+					defer func() { <-sem }()
+
+					if err := dlFile(mtr, lpath, nPath); err != nil {
+						fmt.Fprintln(os.Stderr, "remote mtree:", err)
+						os.Exit(1)
+					}
+				}()
 			}
-		})
+		}
+
+		for createdDir {
+			createdDir = false
+			cbDiff(m, mtree, cbDownloader)
+
+			if createdDir { // Need to go through again, resync...
+				for i := 0; i < limit; i++ {
+					sem <- 0
+				}
+				for i := 0; i < limit; i++ {
+					<-sem
+				}
+
+				m, err := MtreePath(args[0], cachingData, flagFilter,
+					flagProgress, needOldSnap)
+				if err != nil {
+					fmt.Fprintln(os.Stderr, err)
+					os.Exit(2)
+				}
+
+				mtree = m.Nodes
+			}
+		}
 
 	default:
 		usageCmdDef()
