@@ -2,8 +2,9 @@ Mtree
 =====
 
 Metadata trees for looking at a tree of objects as a single unit. Only
-compares with the name and content, although it can store uid/gid/mtime/ctime/etc.
+compares with the name and content, although it can store uid/gid/mtime/etc.
 
+  * To install: go get github.com/james-antill/mtree
 
 Big bugs
 ========
