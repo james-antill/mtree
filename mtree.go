@@ -1145,7 +1145,7 @@ func MtreePath(root string, needCachingData, filter,
 	retRoot := &MTRoot{}
 	hasCache := setupConfig(retRoot, root)
 
-	if hasCache {
+	if hasCache && needCachingData {
 		maybeLatestSnapshotCache(retRoot, needOldSnap, progress)
 		cache := retRoot.Cache
 		osnap := retRoot.LatestSnapshot
@@ -1209,7 +1209,9 @@ func MtreePath(root string, needCachingData, filter,
 			// FIXME: Needs to only write a new file when it changes...
 			// FIXME: Cleanup old files.
 			// FIXME: Needs to do the merging for non-root cache saves.
-			storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
+			if needCachingData {
+				storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
+			}
 		} else {
 			parents := len(strings.Split(retRoot.RootOffset, "/"))
 			mtree := ret

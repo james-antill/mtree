@@ -69,7 +69,7 @@ func atoi(s string) (int64, error) {
 	return i64, err
 }
 
-// MtreeFile loads an mtree froma file.
+// MtreeFile loads an mtree from a file.
 func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 	file, err := os.Open(mfname)
 	if err != nil {
