@@ -9,12 +9,19 @@ import (
 	"io"
 
 	"github.com/cespare/xxhash"
+
 	// djb2/djb2a/sdbm
 	"github.com/dgryski/dgohash"
 	// github.com/spaolacci/murmur3 is more popular, but twmb seemed to have
 	// more testing and amd64 asm.
 	"github.com/twmb/murmur3"
 	"golang.org/x/crypto/sha3"
+
+	"golang.org/x/crypto/blake2b"
+	// Maybe official upstream version?
+	// "lukechampine.com/blake3"
+	// Fast with AVX2 and SSE4.1 acceleration
+	"github.com/zeebo/blake3"
 )
 
 func data2csum(csum string, data []byte) []byte {
@@ -63,6 +70,25 @@ func data2csum(csum string, data []byte) []byte {
 		return val[:]
 	case "shake-256-64":
 		val := ShakeSum256_64(data)
+		return val[:]
+
+	case "blake2b-256":
+		val := blake2b.Sum256(data)
+		return val[:]
+	case "blake2b-384":
+		val := blake2b.Sum384(data)
+		return val[:]
+	case "blake2b-512":
+		val := blake2b.Sum512(data)
+		return val[:]
+	case "blake3-256":
+		val := blake3Sum256(data)
+		return val[:]
+	case "blake3-384":
+		val := blake3Sum384(data)
+		return val[:]
+	case "blake3-512":
+		val := blake3Sum512(data)
 		return val[:]
 
 	case "djb2":
@@ -137,6 +163,19 @@ func chkSize(csum string) int {
 	case "shake-256-64":
 		return 64
 
+	case "blake2b-256":
+		return 32
+	case "blake2b-384":
+		return 48
+	case "blake2b-512":
+		return 64
+	case "blake3-256":
+		return 32
+	case "blake3-384":
+		return 48
+	case "blake3-512":
+		return 64
+
 	case "djb2":
 		return 4
 	case "djb2a":
@@ -194,6 +233,23 @@ func chkNew(csum string) hash.Hash {
 	case "shake-256-64":
 		return &shake2hash64{sha3.NewShake256()}
 
+	case "blake2b-256":
+		// The only blake2b errors are due to hash size and keysize
+		h, _ := blake2b.New256(nil)
+		return h
+	case "blake2b-384":
+		h, _ := blake2b.New384(nil)
+		return h
+	case "blake2b-512":
+		h, _ := blake2b.New512(nil)
+		return h
+	case "blake3-256":
+		return blake3.NewSized(32)
+	case "blake3-384":
+		return blake3.NewSized(48)
+	case "blake3-512":
+		return blake3.NewSized(64)
+
 	case "djb2":
 		return dgohash.NewDjb32()
 	case "djb2a":
@@ -221,6 +277,8 @@ var validChecksumKinds = []string{"md5", "sha1",
 	"sha224", "sha256", "sha384", "sha512", "sha512-224", "sha512-256",
 	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
 	"shake-128-32", "shake-256-64",
+	"blake2b-256", "blake2b-384", "blake2b-512",
+	"blake3-256", "blake3-384", "blake3-512",
 	// These are the non-crypto "fast" hashes...
 	"djb2", "djb2a", "sdbm", "xxh64",
 	"murmur3-32", "murmur3-64", "murmur3-128"}
