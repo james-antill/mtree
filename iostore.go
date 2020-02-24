@@ -29,8 +29,14 @@ func storeWriteFileNode(iow io.Writer, r *MTnode) {
 
 	fmt.Fprintf(iow, "P: %c %d %s\n", storeNodeType(r), len(fn), fn)
 
+	// Double check all the data is there...
 	for _, csum := range calcChecksumKinds {
-		fmt.Fprintf(iow, "C-%s: %s\n", csum, b2s(r.Checksum(csum)))
+		r.Checksum(csum)
+	}
+
+	// Write out everything we have, so we get old checksums too etc.
+	for _, csum := range r.csums {
+		fmt.Fprintf(iow, "C-%s: %s\n", csum.Kind, b2s(csum.Data))
 	}
 
 	fmt.Fprintf(iow, "%s %d\n", "S:", r.Size())

@@ -231,9 +231,43 @@ func calcChecksumsUI() []string {
 // uiChecksumLen is how much of the checksum we show when we want to be smaller
 var uiChecksumLen = 16
 
+func mergeCsums(ocsums, ncsums []Checksum) []Checksum {
+	if len(ocsums) < 1 {
+		return ncsums
+	}
+
+	var csums []Checksum
+
+	for _, kind := range validChecksumKinds {
+		done := false
+		if kind == ncsums[0].Kind {
+			done = true
+			csums = append(csums, ncsums[0])
+			ncsums = ncsums[1:]
+		}
+		if kind == ocsums[0].Kind {
+			if !done {
+				// FIXME: Assert == ncsums?
+				csums = append(csums, ocsums[0])
+			}
+			ocsums = ocsums[1:]
+		}
+		if len(ncsums) == 0 {
+			csums = append(csums, ocsums...)
+			break
+		}
+		if len(ocsums) == 0 {
+			csums = append(csums, ncsums...)
+			break
+		}
+	}
+
+	return csums
+}
+
 func checksumSymlink(r *MTnode, kind string) {
 	// Currently do all the checksums for files...
-	csums := calcChecksumKinds
+	kinds := calcChecksumKinds
 
 	path := r.Path()
 
@@ -245,11 +279,13 @@ func checksumSymlink(r *MTnode, kind string) {
 	// r.data = data
 	r.size = int64(len(data))
 
-	r.csums = nil
-	for _, csum := range csums {
-		c := data2csum(csum, []byte(data))
-		r.csums = append(r.csums, Checksum{csum, c})
+	var csums []Checksum
+	for _, kind := range kinds {
+		c := data2csum(kind, []byte(data))
+		csums = append(csums, Checksum{kind, c})
 	}
+
+	r.csums = mergeCsums(r.csums, csums)
 }
 
 func checksumFile(r *MTnode, kind string) bool {
@@ -273,7 +309,7 @@ func checksumFile(r *MTnode, kind string) bool {
 	}
 	r.size = written
 
-	r.csums = ah.Checksums()
+	r.csums = mergeCsums(r.csums, ah.Checksums())
 
 	return true
 }
@@ -954,7 +990,8 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 		return
 	}
 
-	if !chksumKindSubset(calcChecksumKinds, oldRes.csums) {
+	// FIXME: We lose old cache data, if we don't have subsets.
+	if false && !chksumKindSubset(calcChecksumKinds, oldRes.csums) {
 		if dbgCache {
 			fmt.Println("JDBG:", "!migrate", "hash", p)
 		}
@@ -963,7 +1000,9 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 	if dbgCache {
 		fmt.Println("JDBG:", "migrate", p)
 	}
-	res.csums = oldRes.csums
+
+	// FIXME: Migrate instead of wiping
+	res.csums = mergeCsums(res.csums, oldRes.csums)
 }
 
 // cacheNodes reads the cache information for each node, keeps order the same.
@@ -1772,7 +1811,7 @@ func setupConfig(mtr *MTRoot, path string) bool {
 
 		mtr.Conf = &MTConf{}
 		mtr.Conf.AutoScrub = cfg.Section("core").Key("autoscrub").MustUint(0)
-		// FIXME: checksums...
+		// FIXME: configure which checksums...
 
 		for _, sec := range cfg.Sections() {
 			sn := sec.Name()
