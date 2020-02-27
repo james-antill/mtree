@@ -1455,18 +1455,18 @@ func prntDiffMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string,
 	}
 }
 
-func prntListMtreed(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string) {
+func prntListMtreed(w io.Writer, r *MTnode, tree, ui, children, recurse bool, sizePrefix string) {
 	leafOnly := false
 	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
 		prntListMtree(w, r, tree, ui, sizePrefix)
 	}
 
-	if !r.IsDir() {
+	if !r.IsDir() || !children {
 		return
 	}
 
 	for _, c := range r.Children() {
-		prntListMtreed(w, c, tree, ui, sizePrefix)
+		prntListMtreed(w, c, tree, ui, recurse, recurse, sizePrefix)
 	}
 }
 
@@ -1514,24 +1514,28 @@ func prntInfoMtree(w io.Writer, node *MTnode, cachingData, ui bool) {
 	prntInfoMtreeIn(w, node, cachingData, ui, prntMaxChecsumKindLen())
 }
 
-func prntInfoMtreedIn(w io.Writer, node *MTnode, cachingData, ui bool,
+func prntInfoMtreedIn(w io.Writer, node *MTnode,
+	cachingData, ui, children, recurse bool,
 	checksumKindMaxLen int) {
 	leafOnly := false
 	if !leafOnly || !node.IsDir() || len(node.children) == 0 {
 		prntInfoMtreeIn(w, node, cachingData, ui, checksumKindMaxLen)
 	}
 
-	if !node.IsDir() {
+	if !node.IsDir() || !children {
 		return
 	}
 
 	for _, c := range node.Children() {
-		prntInfoMtreedIn(w, c, cachingData, ui, checksumKindMaxLen)
+		prntInfoMtreedIn(w, c, cachingData, ui, recurse, recurse,
+			checksumKindMaxLen)
 	}
 }
 
-func prntInfoMtreed(w io.Writer, node *MTnode, cachingData, ui bool) {
-	prntInfoMtreedIn(w, node, cachingData, ui, prntMaxChecsumKindLen())
+func prntInfoMtreed(w io.Writer, node *MTnode,
+	cachingData, ui, children, recurse bool) {
+	prntInfoMtreedIn(w, node, cachingData, ui, children, recurse,
+		prntMaxChecsumKindLen())
 }
 
 func usageCmdEqual() {
@@ -1877,11 +1881,14 @@ func main() {
 	var flagProgress bool
 	var flagFilter bool
 	var flagUI bool
+	var flagRecurse bool
 
 	isTermOut := terminal.IsTerminal(int(os.Stdout.Fd()))
 	isTermErr := terminal.IsTerminal(int(os.Stderr.Fd()))
 
 	flag.BoolVar(&flagUI, "ui", isTermOut, "Use UI output")
+	flag.BoolVar(&flagRecurse, "recursive", false, "Decending into directories for list/info")
+	flag.BoolVar(&flagRecurse, "R", false, "Decending into directories for list/info")
 	flag.BoolVar(&flagFast, "fast", false, "Weird speedups")
 	progUsage := "show progress bar"
 	flag.BoolVar(&flagProgress, "progress", isTermErr, progUsage)
@@ -2217,12 +2224,20 @@ func main() {
 
 	switch cmdID {
 	case cmdList:
-		prntListMtreed(fow, mtree, false, flagUI, "")
+		prntListMtreed(fow, mtree, false, flagUI, true, flagRecurse, "")
 	case cmdTree:
-		prntListMtreed(fow, mtree, true, flagUI, "")
+		prntListMtreed(fow, mtree, true, flagUI, true, flagRecurse, "")
 	case cmdInfo:
-		prntInfoMtreed(fow, mtree, cachingData, flagUI)
+		prntInfoMtreed(fow, mtree, cachingData, flagUI, true, flagRecurse)
 	case cmdSummary:
+		// FIXME: Show extra info.
+		if mtr.DotMtreePath != "" {
+			fmt.Fprintln(fow, "Conf:", mtr.DotMtreePath)
+		}
+		if mtr.Conf != nil && mtr.Conf.Remote != nil {
+			fmt.Fprintln(fow, "Remote:", mtr.Conf.Remote.Name)
+
+		}
 		prntInfoMtree(fow, mtree, cachingData, flagUI)
 
 	case cmdEqual:
