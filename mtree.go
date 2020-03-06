@@ -316,13 +316,18 @@ func checksumFile(r *MTnode, kind string) bool {
 
 const hextable = "0123456789abcdef"
 
-func bytes2hex(dd *bytes.Buffer, data []byte) {
-	//		dd += fmt.Sprintf("%x", data)
-	for _, b := range data {
-		dd.WriteByte(hextable[b>>4])
-		dd.WriteByte(hextable[b&0x0f])
-	}
+func hexbytesFromByte(b byte) (byte, byte) {
+	b1 := hextable[b>>4]
+	b2 := hextable[b&0x0f]
+	return b1, b2
+}
 
+func bytesBufferWriteHexData(dd *bytes.Buffer, data []byte) {
+	for _, b := range data {
+		b1, b2 := hexbytesFromByte(b)
+		dd.WriteByte(b1)
+		dd.WriteByte(b2)
+	}
 }
 
 func (r *MTnode) findCsum(kind string) *Checksum {
@@ -395,7 +400,7 @@ func dirBytesChildren1(dd *bytes.Buffer,
 			// Don't warn this is used in file loading...
 			return nil
 		}
-		bytes2hex(dd, chk)
+		bytesBufferWriteHexData(dd, chk)
 		dd.WriteByte('\n')
 	}
 
@@ -423,7 +428,7 @@ func dirBytesChildren2(dd *bytes.Buffer,
 		if chk == nil {
 			return nil
 		}
-		bytes2hex(dd, chk)
+		bytesBufferWriteHexData(dd, chk)
 		dd.WriteByte('\n')
 	}
 
@@ -1380,7 +1385,11 @@ func _muin(ui bool, size int64) string {
 }
 
 func b2s(b []byte) string {
-	return fmt.Sprintf("%x", b)
+	//	return fmt.Sprintf("%x", b)
+	var dd bytes.Buffer
+	dd.Grow(len(b) * 2)
+	bytesBufferWriteHexData(&dd, b)
+	return dd.String()
 }
 
 func uiChecksum(r *MTnode, ui bool) string {
