@@ -1407,9 +1407,39 @@ func uiChecksum(r *MTnode, ui bool) string {
 	return chksum
 }
 
-func uiPath(r *MTnode, tree bool) string {
+type treeT int
+
+const (
+	treeTunknown treeT = iota
+	treeTascii
+	treeTutf8
+)
+
+var treeType treeT
+
+func isLastEnt(last []bool, i int) bool {
+	if i <= 0 {
+		return false
+	}
+
+	if len(last) < i {
+		return false
+	}
+
+	return last[i-1]
+}
+
+func uiPath(r *MTnode, tree bool, last []bool) string {
 	if !tree {
 		return r.Path()
+	}
+
+	if treeType == treeTunknown {
+		if strings.HasSuffix(strings.ToLower(os.Getenv("LANG")), ".utf-8") {
+			treeType = treeTutf8
+		} else {
+			treeType = treeTascii
+		}
 	}
 
 	var fn string
@@ -1417,17 +1447,48 @@ func uiPath(r *MTnode, tree bool) string {
 	if depth == 0 {
 		fn = r.name
 	} else {
-		indent := strings.Repeat(" |  ", depth-1) + " \\_ "
+		// https://en.wikipedia.org/wiki/Box-drawing_character
+		// beg := " ┣━"
+		// mid := "━╋━"
+		mid1 := "  "
+		mid2 := "┃ "
+		// end1 := "━╋━ "
+		// end2 := "━┻━ "
+		end1 := "┗━ "
+		end2 := "┣━ "
+
+		if treeType == treeTascii {
+			mid2 = "| "
+			end1 = "\\_ "
+			end2 = "|_ "
+		}
+
+		indent := ""
+		p := ""
+		for i := 1; i < depth; i++ {
+			if isLastEnt(last, i) {
+				indent += p + mid1
+			} else {
+				indent += p + mid2
+			}
+			p = " "
+		}
+		if isLastEnt(last, depth) {
+			indent += p + end1
+		} else {
+			indent += p + end2
+		}
 		fn = indent + r.name
 	}
 
 	return fn
 }
 
-func prntListMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string) {
+func prntListMtree(w io.Writer, r *MTnode, tree bool, last []bool, ui bool,
+	sizePrefix string) {
 	chksum := uiChecksum(r, ui)
 
-	fn := uiPath(r, tree)
+	fn := uiPath(r, tree, last)
 
 	if ui && r.IsDir() && r.parent != nil {
 		fn = fn + "/"
@@ -1440,7 +1501,7 @@ func prntDiffMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string,
 	osize int64) {
 	chksum := uiChecksum(r, ui)
 
-	fn := uiPath(r, tree)
+	fn := uiPath(r, tree, nil)
 
 	if ui && r.IsDir() && r.parent != nil {
 		fn = fn + "/"
@@ -1464,18 +1525,27 @@ func prntDiffMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string,
 	}
 }
 
-func prntListMtreed(w io.Writer, r *MTnode, tree, ui, children, recurse bool, sizePrefix string) {
+func prntListMtreed(w io.Writer, r *MTnode, tree bool, last []bool,
+	ui, showChildren, recurse bool, sizePrefix string) {
 	leafOnly := false
 	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
-		prntListMtree(w, r, tree, ui, sizePrefix)
+		prntListMtree(w, r, tree, last, ui, sizePrefix)
 	}
 
-	if !r.IsDir() || !children {
+	if !r.IsDir() || !showChildren {
 		return
 	}
 
-	for _, c := range r.Children() {
-		prntListMtreed(w, c, tree, ui, recurse, recurse, sizePrefix)
+	children := r.Children()
+	num := len(children)
+	// FIXME: Has to be a better way...
+	nlast := append([]bool(nil), last...)
+	nlast = append(nlast, false)
+	for i, c := range children {
+		if i == num-1 {
+			nlast[len(nlast)-1] = true
+		}
+		prntListMtreed(w, c, tree, nlast, ui, recurse, recurse, sizePrefix)
 	}
 }
 
@@ -2233,9 +2303,9 @@ func main() {
 
 	switch cmdID {
 	case cmdList:
-		prntListMtreed(fow, mtree, false, flagUI, true, flagRecurse, "")
+		prntListMtreed(fow, mtree, false, nil, flagUI, true, flagRecurse, "")
 	case cmdTree:
-		prntListMtreed(fow, mtree, true, flagUI, true, flagRecurse, "")
+		prntListMtreed(fow, mtree, true, nil, flagUI, true, true, "")
 	case cmdInfo:
 		prntInfoMtreed(fow, mtree, cachingData, flagUI, true, flagRecurse)
 	case cmdSummary:

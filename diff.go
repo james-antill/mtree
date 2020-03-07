@@ -125,8 +125,8 @@ func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
 			prntDiffMtree(w, n, tree, ui, "-", n.Size())
 		case cbMod:
 			if false {
-				prntListMtree(w, on[0], tree, ui, "-")
-				prntListMtree(w, n, tree, ui, "+")
+				prntListMtree(w, on[0], tree, nil, ui, "-")
+				prntListMtree(w, n, tree, nil, ui, "+")
 			} else {
 				prntDiffMtree(w, n, tree, ui, "!", on[0].Size())
 			}
