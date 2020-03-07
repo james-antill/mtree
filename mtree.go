@@ -1497,11 +1497,11 @@ func prntListMtree(w io.Writer, r *MTnode, tree bool, last []bool, ui bool,
 	fmt.Fprintf(w, "%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
 }
 
-func prntDiffMtree(w io.Writer, r *MTnode, tree, ui bool, sizePrefix string,
-	osize int64) {
+func prntDiffMtree(w io.Writer, r *MTnode, tree bool, last []bool, ui bool,
+	sizePrefix string, osize int64) {
 	chksum := uiChecksum(r, ui)
 
-	fn := uiPath(r, tree, nil)
+	fn := uiPath(r, tree, last)
 
 	if ui && r.IsDir() && r.parent != nil {
 		fn = fn + "/"
@@ -2494,7 +2494,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		prntDiff(fow, omtree, mtree, false, flagUI)
+		prntDiff(fow, omtree, mtree, true, flagUI)
 
 	case cmdPull:
 		if mtr == nil || mtr.Conf == nil || mtr.Conf.Remote == nil {
@@ -2598,7 +2598,7 @@ func main() {
 		// Note that old is remote, and new is local ... this means:
 		//  Delete's need to be downloaded
 		//  Additions need to be deleted (maybe)
-		cbDownloader := func(n *MTnode, cbT cbType, on ...*MTnode) {
+		cbDownloader := func(n *MTnode, cbT cbType, _ []bool, on ...*MTnode) {
 
 			nPath := n.Path()
 			fdir := strings.IndexByte(nPath, '/')
@@ -2655,7 +2655,7 @@ func main() {
 
 		for createdDir {
 			createdDir = false
-			cbDiff(m, mtree, cbDownloader)
+			cbDiff(m, mtree, nil, cbDownloader)
 
 			if createdDir { // Need to go through again, resync...
 				for i := 0; i < limit; i++ {

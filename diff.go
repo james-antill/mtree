@@ -71,15 +71,21 @@ const (
 	cbEqual // Gets the old value as an extra
 )
 
-func cbDiff(r1, r2 *MTnode, cb func(*MTnode, cbType, ...*MTnode)) {
+// last is always based on r2, aka. new
+func cbDiff(r1, r2 *MTnode, last []bool,
+	cb func(*MTnode, cbType, []bool, ...*MTnode)) {
 	if cmpChksumEq(r1, r2) {
-		cb(r2, cbEqual, r1)
+		cb(r2, cbEqual, last, r1)
 	} else {
-		cb(r2, cbMod, r1)
+		cb(r2, cbMod, last, r1)
 	}
 
 	r1s := r1.Children()
 	r2s := r2.Children()
+
+	// FIXME: Has to be a better way...
+	nlast := append([]bool(nil), last...)
+	nlast = append(nlast, false)
 
 	for len(r1s) > 0 && len(r2s) > 0 {
 		i1 := r1s[0]
@@ -87,51 +93,66 @@ func cbDiff(r1, r2 *MTnode, cb func(*MTnode, cbType, ...*MTnode)) {
 
 		if i1.name != i2.name {
 			if fcmp(i1.name, i2.name) < 0 {
-				cb(i1, cbDel)
+				cb(i1, cbDel, nlast)
 				r1s = r1s[1:]
 			} else {
-				cb(i2, cbAdd)
+				cb(i2, cbAdd, nlast)
 				r2s = r2s[1:]
 			}
 			continue
 		}
 
+		// Same name, so "same entry"
+		if len(r1s) == 1 && len(r2s) == 1 {
+			nlast[len(nlast)-1] = true
+		}
+
 		if cmpChksumEq(i1, i2) {
-			cb(i2, cbEqual, i1)
+			cb(i2, cbEqual, nlast, i1)
 		} else if i1.IsDir() && i2.IsDir() {
-			cbDiff(i1, i2, cb)
+			cbDiff(i1, i2, nlast, cb)
 		} else {
-			cb(i2, cbMod, i1)
+			cb(i2, cbMod, nlast, i1)
 		}
 
 		r1s = r1s[1:]
 		r2s = r2s[1:]
 	}
 
-	for _, i1 := range r1s {
-		cb(i1, cbDel)
+	for len(r1s) > 0 {
+		i1 := r1s[0]
+		if len(r2s) == 0 && len(r1s) == 1 {
+			nlast[len(nlast)-1] = true
+		}
+		cb(i1, cbDel, nlast)
+		r1s = r1s[1:]
 	}
-	for _, i2 := range r2s {
-		cb(i2, cbAdd)
+	for len(r2s) > 0 {
+		i2 := r2s[0]
+		if len(r2s) == 1 {
+			nlast[len(nlast)-1] = true
+		}
+		cb(i2, cbAdd, nlast)
+		r2s = r2s[1:]
 	}
 }
 
 func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
-	cbDiff(r1, r2, func(n *MTnode, cbT cbType, on ...*MTnode) {
+	cbDiff(r1, r2, nil, func(n *MTnode, cbT cbType, last []bool, on ...*MTnode) {
 		switch cbT {
 		case cbAdd:
-			prntDiffMtree(w, n, tree, ui, "+", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, "+", n.Size())
 		case cbDel:
-			prntDiffMtree(w, n, tree, ui, "-", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, "-", n.Size())
 		case cbMod:
 			if false {
-				prntListMtree(w, on[0], tree, nil, ui, "-")
-				prntListMtree(w, n, tree, nil, ui, "+")
+				prntListMtree(w, on[0], tree, last, ui, "-")
+				prntListMtree(w, n, tree, last, ui, "+")
 			} else {
-				prntDiffMtree(w, n, tree, ui, "!", on[0].Size())
+				prntDiffMtree(w, n, tree, last, ui, "!", on[0].Size())
 			}
 		case cbEqual:
-			prntDiffMtree(w, n, tree, ui, " ", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, " ", n.Size())
 		}
 	})
 }
