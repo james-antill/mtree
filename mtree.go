@@ -1429,6 +1429,9 @@ func isLastEnt(last []bool, i int) bool {
 	return last[i-1]
 }
 
+const treeOutputThinLines = false
+const treeOutputHistoricalASCII = false
+
 func uiPath(r *MTnode, tree bool, last []bool) string {
 	if !tree {
 		return r.Path()
@@ -1448,19 +1451,30 @@ func uiPath(r *MTnode, tree bool, last []bool) string {
 		fn = r.name
 	} else {
 		// https://en.wikipedia.org/wiki/Box-drawing_character
-		// beg := " ┣━"
-		// mid := "━╋━"
-		mid1 := "  "
-		mid2 := "┃ "
-		// end1 := "━╋━ "
-		// end2 := "━┻━ "
-		end1 := "┗━ "
-		end2 := "┣━ "
+		mid1 := "  "  // Last entry at this midpoint
+		mid2 := "┃ "  // More entries at this midpoint.
+		end1 := "┗━ " // Last entry at the endpoint
+		end2 := "┣━ " // More entries at the endpoint
+		sep := " "    // After the first entry, separate with this.
+
+		if treeOutputThinLines { // Add thin lines from the checksum data
+			mid1 = "──"
+			mid2 = "╂─"
+			end1 = "┗━ "
+			end2 = "┣━ "
+			sep = "─"
+		}
 
 		if treeType == treeTascii {
+			mid1 = "  "
 			mid2 = "| "
 			end1 = "\\_ "
 			end2 = "|_ "
+			sep = " "
+			if treeOutputHistoricalASCII { // Traditional tree output
+				end1 = "`- "
+				end2 = "|- "
+			}
 		}
 
 		indent := ""
@@ -1471,7 +1485,7 @@ func uiPath(r *MTnode, tree bool, last []bool) string {
 			} else {
 				indent += p + mid2
 			}
-			p = " "
+			p = sep
 		}
 		if isLastEnt(last, depth) {
 			indent += p + end1
