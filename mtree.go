@@ -1063,13 +1063,18 @@ func maybeFDCMigrate(fdc *filedatacache.FDC, res *MTnode) {
 	res.csums = mergeCsums(res.csums, csums)
 }
 
+// minFileCacheSize is the minimum limit on the size of files we cache in FDC
+// Note that if this gets too low then there's a recursion problem with
+// mtree sum ~/<cache>/filedatacache
+const minFileCacheSize = 1024
+
 // saveFDCMetadata cache the checksums into the filedatacache
 func saveFDCMetadata(fdc *filedatacache.FDC, res *MTnode) {
 	if fdc == nil { // Easier API...
 		return
 	}
 
-	if res.IsDir() || res.IsSymlink() || res.size < 1024 {
+	if res.IsDir() || res.IsSymlink() || res.size < minFileCacheSize {
 		return // Only cache big files.
 	}
 
