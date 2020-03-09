@@ -95,6 +95,9 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 	scanner := bufio.NewScanner(zr)
 	if !scanner.Scan() {
+			return nil, fmt.Errorf("Invalid mtree file: %s", mfname)
+	}
+
 		switch scanner.Text() {
 		case "mtree-file-0.1":
 			fallthrough
@@ -103,7 +106,6 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 		default:
 			return nil, fmt.Errorf("Invalid mtree file: %s", mfname)
 		}
-	}
 
 	root := rootRes()
 	var hasRoot = false
