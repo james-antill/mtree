@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -21,6 +22,7 @@ import (
 	// "github.com/saracen/walker"
 	walker "github.com/karrick/godirwalk"
 
+	"github.com/james-antill/filedatacache"
 	"github.com/james-antill/mpb"
 	"github.com/james-antill/mpb/decor"
 	roc "github.com/james-antill/rename-on-close"
@@ -1036,6 +1038,73 @@ func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
 	return cacheNodes
 }
 
+// maybeFDCMigrate tries to migrate the data from the FDC to the node.
+func maybeFDCMigrate(fdc *filedatacache.FDC, res *MTnode) {
+	var csums []Checksum
+
+	tm := time.Unix(0, res.mtimeNsecs)
+	key := filedatacache.Key{Path: res.Path(),
+		ModTime: tm, Size: res.size}
+	md := fdc.Get(key)
+	for _, kind := range validChecksumKinds {
+		if v, ok := md["C-"+kind]; ok {
+			bv, err := hex.DecodeString(v)
+			if err != nil {
+				continue
+			}
+			csum := Checksum{Kind: kind, Data: bv}
+			csums = append(csums, csum)
+		}
+	}
+	res.csums = mergeCsums(res.csums, csums)
+}
+
+// saveFDCMetadata cache the checksums into the filedatacache
+func saveFDCMetadata(fdc *filedatacache.FDC, res *MTnode) {
+	// FIXME: This overwrites all the other FDC data
+	tm := time.Unix(0, res.mtimeNsecs)
+	key := filedatacache.Key{Path: res.Path(),
+		ModTime: tm, Size: res.size}
+	md := make(filedatacache.Metadata)
+	for _, csum := range res.csums {
+		md["C-"+csum.Kind] = b2s(csum.Data)
+	}
+	// FIXME: go this?
+	fdc.Put(key, md)
+}
+
+// fileCacheNodes reads the fdc information for each node, keeps order the same.
+func fileCacheNodes(nodes <-chan *MTnode, qlen int,
+	trimPrefix string) <-chan *MTnode {
+
+	fdc := filedatacache.New()
+	if fdc == nil {
+		return nodes
+	}
+
+	cacheNodes := make(chan *MTnode, qlen)
+
+	var wg sync.WaitGroup
+	wg.Add(qlen)
+
+	for i := 0; i < qlen; i++ {
+		go func() {
+			for res := range nodes {
+				maybeFDCMigrate(fdc, res)
+				cacheNodes <- res
+			}
+			wg.Done()
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(cacheNodes)
+	}()
+
+	return cacheNodes
+}
+
 // progressLenNodes gets all the nodes to get the total number, keeps order the same.
 // NOTE: This is sometimes faster and sometimes slower??
 func progressLenNodes(nodes <-chan *MTnode, qlen int) (<-chan *MTnode, int64) {
@@ -1091,10 +1160,16 @@ func digestNodes(nodes <-chan *MTnode, qlen int, numNodes int64,
 		dbar = p.AddBarDef(numNodes, progress, decor.Unit_k)
 	}
 
+	fdc := filedatacache.New()
+
 	for i := 0; i < qlen; i++ {
 		go func() {
 			for res := range nodes {
+				prelen := len(res.csums)
 				digest(res, dbar)
+				if fdc != nil && len(res.csums) != prelen {
+					saveFDCMetadata(fdc, res)
+				}
 				digestNodes <- res
 			}
 			wg.Done()
@@ -1146,8 +1221,8 @@ type MTConf struct {
 
 // MTRoot is the main holder of the nodes from Path(), and the config/etc.
 type MTRoot struct {
+	// Cache          *MTnode
 	Nodes          *MTnode
-	Cache          *MTnode
 	LatestSnapshot *MTnode
 
 	DotMtreePath string
@@ -1187,15 +1262,9 @@ func MtreePath(root string, needCachingData, filter,
 
 	if hasCache && needCachingData {
 		maybeLatestSnapshotCache(retRoot, needOldSnap, progress)
-		cache := retRoot.Cache
+		// cache := retRoot.Cache
 		osnap := retRoot.LatestSnapshot
 		if retRoot.RootOffset != "" {
-			if cache != nil {
-				cache, err = mtreeChdir(cache, retRoot.RootOffset)
-				if err != nil {
-					cache = nil
-				}
-			}
 			if osnap != nil {
 				osnap, err = mtreeChdir(osnap, retRoot.RootOffset)
 				if err != nil {
@@ -1206,7 +1275,7 @@ func MtreePath(root string, needCachingData, filter,
 		}
 
 		nodes = statNodes(nodes, numDigesters)
-		nodes = cacheNodes(nodes, numDigesters, cache, root+"/")
+		nodes = fileCacheNodes(nodes, numDigesters, root+"/")
 		nodes = cacheNodes(nodes, numDigesters, osnap, root+"/")
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
@@ -1249,9 +1318,9 @@ func MtreePath(root string, needCachingData, filter,
 			// FIXME: Needs to only write a new file when it changes...
 			// FIXME: Cleanup old files.
 			// FIXME: Needs to do the merging for non-root cache saves.
-			if needCachingData {
-				storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
-			}
+			//			if needCachingData {
+			//				storeWriteDotMtree(root+"/.mtree", "/cache/", false, ret)
+			//			}
 		} else {
 			parents := len(strings.Split(retRoot.RootOffset, "/"))
 			mtree := ret
@@ -1934,13 +2003,12 @@ func setupConfig(mtr *MTRoot, path string) bool {
 func maybeLatestSnapshotCache(mtr *MTRoot, needOldSnap, flagProgress bool) {
 	dmt := mtr.DotMtreePath
 
-	// FIXME: Don't need to load both, optimize it all away behind functions...
-	cm, err := latestCache(dmt)
-	if err == nil {
-		fname := dmt + "/cache/" + cm
-		c, _ := MtreeFile(fname, flagProgress)
-		mtr.Cache = c
-	}
+	//	cm, err := latestCache(dmt)
+	//	if err == nil {
+	//		fname := dmt + "/cache/" + cm
+	//		c, _ := MtreeFile(fname, flagProgress)
+	//		mtr.Cache = c
+	//	}
 
 	snapMtree, err := latestSnapshot(dmt, flagProgress)
 	if err == nil {
@@ -2492,7 +2560,7 @@ func main() {
 		mkpathMust(args[0], ".mtree")
 		mkpathMust(args[0], ".mtree/local")
 		mkpathMust(args[0], ".mtree/remote")
-		mkpathMust(args[0], ".mtree/cache")
+		mkpathMust(args[0], ".mtree/cache") // FIXME: Keep this?
 		mkpathMust(args[0], ".mtree/data")
 		// FIXME: Dump config to .mtree/config
 
