@@ -965,10 +965,6 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 		return
 	}
 
-	if res.csums != nil {
-		return
-	}
-
 	fp := res.Path()
 
 	p := strings.TrimPrefix(fp, trimPrefix)
