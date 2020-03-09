@@ -78,6 +78,8 @@ type MTnode struct {
 
 	isDir     bool
 	isSymlink bool
+
+	missingFileDataCache bool
 }
 
 // Name of the node
@@ -943,6 +945,7 @@ func statNodes(nodes <-chan *MTnode, qlen int) <-chan *MTnode {
 	return statNodes
 }
 
+// chksumKindSubset sees if the checksum list r2 contains all of the kinds in r1
 func chksumKindSubset(r1 []string, r2 []Checksum) bool {
 	for len(r1) > 0 && len(r2) > 0 {
 		if r1[0] == r2[0].Kind {
@@ -993,13 +996,6 @@ func maybeMigrate(cache, res *MTnode, trimPrefix string) {
 		return
 	}
 
-	// FIXME: We lose old cache data, if we don't have subsets.
-	if false && !chksumKindSubset(calcChecksumKinds, oldRes.csums) {
-		if dbgCache {
-			fmt.Println("JDBG:", "!migrate", "hash", p)
-		}
-		return
-	}
 	if dbgCache {
 		fmt.Println("JDBG:", "migrate", p)
 	}
@@ -1042,10 +1038,18 @@ func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
 func maybeFDCMigrate(fdc *filedatacache.FDC, res *MTnode) {
 	var csums []Checksum
 
+	if chksumKindSubset(calcChecksumKinds, res.csums) {
+		// If we have everything from the osnap, don't waste time loading fdc.
+		return
+	}
+
 	tm := time.Unix(0, res.mtimeNsecs)
 	key := filedatacache.Key{Path: res.Path(),
 		ModTime: tm, Size: res.size}
 	md := fdc.Get(key)
+	if md == nil { // If there is no cache, add one anyway.
+		res.missingFileDataCache = true
+	}
 	for _, kind := range validChecksumKinds {
 		if v, ok := md["C-"+kind]; ok {
 			bv, err := hex.DecodeString(v)
@@ -1061,6 +1065,14 @@ func maybeFDCMigrate(fdc *filedatacache.FDC, res *MTnode) {
 
 // saveFDCMetadata cache the checksums into the filedatacache
 func saveFDCMetadata(fdc *filedatacache.FDC, res *MTnode) {
+	if fdc == nil { // Easier API...
+		return
+	}
+
+	if res.IsDir() || res.IsSymlink() || res.size < 1024 {
+		return // Only cache big files.
+	}
+
 	// FIXME: This overwrites all the other FDC data
 	tm := time.Unix(0, res.mtimeNsecs)
 	key := filedatacache.Key{Path: res.Path(),
@@ -1069,7 +1081,7 @@ func saveFDCMetadata(fdc *filedatacache.FDC, res *MTnode) {
 	for _, csum := range res.csums {
 		md["C-"+csum.Kind] = b2s(csum.Data)
 	}
-	// FIXME: go this?
+	// FIXME: go this? Or rely on the fact we are in goroutines already?
 	fdc.Put(key, md)
 }
 
@@ -1167,7 +1179,7 @@ func digestNodes(nodes <-chan *MTnode, qlen int, numNodes int64,
 			for res := range nodes {
 				prelen := len(res.csums)
 				digest(res, dbar)
-				if fdc != nil && len(res.csums) != prelen {
+				if (len(res.csums) != prelen) || res.missingFileDataCache {
 					saveFDCMetadata(fdc, res)
 				}
 				digestNodes <- res
@@ -1275,8 +1287,9 @@ func MtreePath(root string, needCachingData, filter,
 		}
 
 		nodes = statNodes(nodes, numDigesters)
-		nodes = fileCacheNodes(nodes, numDigesters, root+"/")
 		nodes = cacheNodes(nodes, numDigesters, osnap, root+"/")
+		// Only need to load file cache, if we didn't load snap (or it's old)
+		nodes = fileCacheNodes(nodes, numDigesters, root+"/")
 	} else if needCachingData {
 		nodes = statNodes(nodes, numDigesters)
 	}

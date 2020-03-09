@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/cespare/xxhash v1.1.0
 	github.com/dgryski/dgohash v0.0.0-20181015193854-bc94635621ad
-	github.com/james-antill/filedatacache v0.0.0-20200309024022-4a760147a88c
+	github.com/james-antill/filedatacache v0.9.1
 	github.com/james-antill/mpb v3.0.5-0.20190217185350-6ffc963cfc7d+incompatible
 	github.com/james-antill/rename-on-close v0.0.0-20181008023607-cfbc20f39567
 	github.com/karrick/godirwalk v1.15.3

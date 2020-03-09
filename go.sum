@@ -8,8 +8,8 @@ github.com/dgryski/dgohash v0.0.0-20181015193854-bc94635621ad h1:y+KtPFl9r8KnMm2
 github.com/dgryski/dgohash v0.0.0-20181015193854-bc94635621ad/go.mod h1:5U7QOv6DFpngdeuj14yOvsehDGUGJSr9XPmYHdH097M=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 h1:EGx4pi6eqNxGaHF6qqu48+N2wcFQ5qg5FXgOdqsJ5d8=
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
-github.com/james-antill/filedatacache v0.0.0-20200309024022-4a760147a88c h1:uHHp1UhANELYb/g5w060IHjYvt/7OaGOzvRcScQ8MMM=
-github.com/james-antill/filedatacache v0.0.0-20200309024022-4a760147a88c/go.mod h1:5bkFSonqhtQwKguNZfTeHn1NpW6+6oNVJBTHkMayUjY=
+github.com/james-antill/filedatacache v0.9.1 h1:3AklkwgtZ/BCH5GacpNqTlAJ/vjAc8cJPLb2QIomOGs=
+github.com/james-antill/filedatacache v0.9.1/go.mod h1:95R0UUF0+ktRTKwqwP9oCK34MauhCQkk6ZEFQmiN8JA=
 github.com/james-antill/mpb v3.0.5-0.20190217185350-6ffc963cfc7d+incompatible h1:xXwL3joJKZCa9NbtTxlkQ307VQlOuXxmWHBqm04qANM=
 github.com/james-antill/mpb v3.0.5-0.20190217185350-6ffc963cfc7d+incompatible/go.mod h1:c87126LYHDqweppQFwX6aq+oQvsrj2nOFOYJsPML/mQ=
 github.com/james-antill/rename-on-close v0.0.0-20181008023607-cfbc20f39567 h1:wFc3/DX/8p5wHnY3cckwlD1sk5mqIWW0Lgg/UrE0R+Y=
