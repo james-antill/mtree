@@ -11,8 +11,6 @@ Big bugs
 
 No real module API atm. -- will happen soon.
 
-.mtree/cache problems when empty and using offsets?
-
 misc bugs/etc.
 ==============
 
@@ -25,9 +23,6 @@ Not enough tests. never?
     rm parent? - .Path() becomes annoying.
 
 metadata dir?
-
-cache by file?
-    cache in ~/.cache/ for "large" files?
 
 snap creates .gz/.xz files?
     https://github.com/klauspost/compress/tree/master/zstd#zstd
