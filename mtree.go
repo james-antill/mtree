@@ -2028,6 +2028,10 @@ func maybeLatestSnapshotCache(mtr *MTRoot, needOldSnap, flagProgress bool) {
 	//		mtr.Cache = c
 	//	}
 
+	if !needOldSnap && mtr.RootOffset != "" {
+		return
+	}
+
 	snapMtree, err := latestSnapshot(dmt, flagProgress)
 	if err == nil {
 		fname := dmt + "/local/" + snapMtree
