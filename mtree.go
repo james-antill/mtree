@@ -243,6 +243,14 @@ func mergeCsums(ocsums, ncsums []Checksum) []Checksum {
 	var csums []Checksum
 
 	for _, kind := range validChecksumKinds {
+		if len(ncsums) == 0 {
+			csums = append(csums, ocsums...)
+			break
+		}
+		if len(ocsums) == 0 {
+			csums = append(csums, ncsums...)
+			break
+		}
 		done := false
 		if kind == ncsums[0].Kind {
 			done = true
@@ -255,14 +263,6 @@ func mergeCsums(ocsums, ncsums []Checksum) []Checksum {
 				csums = append(csums, ocsums[0])
 			}
 			ocsums = ocsums[1:]
-		}
-		if len(ncsums) == 0 {
-			csums = append(csums, ocsums...)
-			break
-		}
-		if len(ocsums) == 0 {
-			csums = append(csums, ncsums...)
-			break
 		}
 	}
 
