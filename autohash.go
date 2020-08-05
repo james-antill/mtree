@@ -84,12 +84,12 @@ func data2csum(csum string, data []byte) []byte {
 	case "blake3-256":
 		val := blake3Sum256(data)
 		return val[:]
-	case "blake3-384":
-		val := blake3Sum384(data)
-		return val[:]
-	case "blake3-512":
-		val := blake3Sum512(data)
-		return val[:]
+	//case "blake3-384":
+	//val := blake3Sum384(data)
+	//return val[:]
+	//case "blake3-512":
+	//val := blake3Sum512(data)
+	//return val[:]
 
 	case "djb2":
 		h := dgohash.NewDjb32()
@@ -171,10 +171,10 @@ func chkSize(csum string) int {
 		return 64
 	case "blake3-256":
 		return 32
-	case "blake3-384":
-		return 48
-	case "blake3-512":
-		return 64
+	//case "blake3-384":
+	//return 48
+	//case "blake3-512":
+	//return 64
 
 	case "djb2":
 		return 4
@@ -244,11 +244,12 @@ func chkNew(csum string) hash.Hash {
 		h, _ := blake2b.New512(nil)
 		return h
 	case "blake3-256":
-		return blake3.NewSized(32)
-	case "blake3-384":
-		return blake3.NewSized(48)
-	case "blake3-512":
-		return blake3.NewSized(64)
+		return blake3.New()
+		// zeebo/blake3 broke this.
+	// case "blake3-384":
+	// return blake3.NewSized(48)
+	// case "blake3-512":
+	// return blake3.NewSized(64)
 
 	case "djb2":
 		return dgohash.NewDjb32()
@@ -278,7 +279,7 @@ var validChecksumKinds = []string{"md5", "sha1",
 	"sha3-224", "sha3-256", "sha3-384", "sha3-512",
 	"shake-128-32", "shake-256-64",
 	"blake2b-256", "blake2b-384", "blake2b-512",
-	"blake3-256", "blake3-384", "blake3-512",
+	"blake3-256", // "blake3-384", "blake3-512",
 	// These are the non-crypto "fast" hashes...
 	"djb2", "djb2a", "sdbm", "xxh64",
 	"murmur3-32", "murmur3-64", "murmur3-128"}
