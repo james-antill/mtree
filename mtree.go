@@ -2081,6 +2081,9 @@ func main() {
 		numCPUWorkers, "manually set number of checksum workers")
 	flag.Parse()
 
+	if flagPChecksum == "all" {
+		flagPChecksum = strings.Join(validChecksumKinds, ", ")
+	}
 	if flagPChecksum != "" && flagPChecksum != pchkDef {
 		f := func(c rune) bool {
 			switch c {
