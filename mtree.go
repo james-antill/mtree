@@ -51,11 +51,11 @@ func numCPUDigesters() int {
 	numDigesters := numCPUWorkers
 	if numDigesters < 1 {
 		numDigesters = runtime.NumCPU()
-	}
-	if numDigesters >= 1 {
-		numDigesters *= 2
-	} else {
-		numDigesters = 2
+		if numDigesters >= 1 {
+			numDigesters *= 2
+		} else {
+			numDigesters = 2
+		}
 	}
 
 	return numDigesters
