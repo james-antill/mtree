@@ -211,7 +211,18 @@ func calcChecksumsDone() {
 	if calcChecksumKindPrimary == "" {
 		panic("calcChecksumKindPrimary is unset")
 	}
-	sort.Strings(calcChecksumKinds)
+	// sort.Strings(calcChecksumKinds)
+	// Need to sort checksums in valid order...
+	cck := make([]string, 0, len(calcChecksumKinds))
+	for _, kind := range validChecksumKinds {
+		for _, k := range calcChecksumKinds {
+			if k == kind {
+				cck = append(cck, kind)
+				break
+			}
+		}
+	}
+	calcChecksumKinds = cck
 }
 
 // calcChecksumsUI produces ordered output for initialization UI, where the
@@ -929,11 +940,11 @@ func statNodes(nodes <-chan *MTnode, qlen int) <-chan *MTnode {
 
 	for i := 0; i < qlen; i++ {
 		go func() {
+			defer wg.Done()
 			for res := range nodes {
 				statNode(res)
 				statNodes <- res
 			}
-			wg.Done()
 		}()
 	}
 
@@ -1018,11 +1029,11 @@ func cacheNodes(nodes <-chan *MTnode, qlen int, cache *MTnode,
 
 	for i := 0; i < qlen; i++ {
 		go func() {
+			defer wg.Done()
 			for res := range nodes {
 				maybeMigrate(cache, res, trimPrefix)
 				cacheNodes <- res
 			}
-			wg.Done()
 		}()
 	}
 
@@ -1106,15 +1117,16 @@ func fileCacheNodes(nodes <-chan *MTnode, qlen int,
 
 	for i := 0; i < qlen; i++ {
 		go func() {
+			defer wg.Done()
 			for res := range nodes {
 				maybeFDCMigrate(fdc, res)
 				cacheNodes <- res
 			}
-			wg.Done()
 		}()
 	}
 
 	go func() {
+
 		wg.Wait()
 		close(cacheNodes)
 	}()
@@ -1181,6 +1193,7 @@ func digestNodes(nodes <-chan *MTnode, qlen int, numNodes int64,
 
 	for i := 0; i < qlen; i++ {
 		go func() {
+			defer wg.Done()
 			for res := range nodes {
 				prelen := len(res.csums)
 				digest(res, dbar)
@@ -1189,7 +1202,6 @@ func digestNodes(nodes <-chan *MTnode, qlen int, numNodes int64,
 				}
 				digestNodes <- res
 			}
-			wg.Done()
 		}()
 	}
 	go func() {
@@ -2109,9 +2121,11 @@ func main() {
 			calcChecksumsAdd(csum)
 		}
 		if calcChecksumKindPrimary == "" {
-			oneOf := strings.Join(validChecksumKinds, ", ")
+			oneOfs := validChecksumKinds[:]
+			sort.Strings(oneOfs)
+			oneOf := strings.Join(oneOfs, ", ")
 			fmt.Fprintf(os.Stderr, "Non-valid checksums flag: %s\n"+
-				" Choose from: %s\n", flagPChecksum, oneOf)
+				" Choose from: %s (or \"all\")\n", flagPChecksum, oneOf)
 			fullUsageCmdDef(1)
 		}
 		calcChecksumsDone()
