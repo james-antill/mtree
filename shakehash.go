@@ -74,7 +74,7 @@ func (s *shake2hash64) Sum(b []byte) []byte {
 // ShakeSum128_32 is a 32 byte output version of ShakeSum128
 func ShakeSum128_32(data []byte) [32]byte {
 	var ret [32]byte
-	sha3.ShakeSum256(ret[:], data)
+	sha3.ShakeSum128(ret[:], data)
 	return ret
 }
 
