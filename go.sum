@@ -10,8 +10,8 @@ github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1 h1:EGx4pi6eqNxGa
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/james-antill/filedatacache v0.9.1 h1:3AklkwgtZ/BCH5GacpNqTlAJ/vjAc8cJPLb2QIomOGs=
 github.com/james-antill/filedatacache v0.9.1/go.mod h1:95R0UUF0+ktRTKwqwP9oCK34MauhCQkk6ZEFQmiN8JA=
-github.com/james-antill/mpb v3.0.4+incompatible h1:emH5YU5pPm7jcYW3faKzxujLkIFF27TDYmYN10xdodw=
-github.com/james-antill/mpb v3.0.4+incompatible/go.mod h1:c87126LYHDqweppQFwX6aq+oQvsrj2nOFOYJsPML/mQ=
+github.com/james-antill/mpb v1.1.4-0.20201107062900-4648915e8ccb h1:1fVcNdbwZYtZGcbwyebx2VPHTas57JN/0FLELtZS5to=
+github.com/james-antill/mpb v1.1.4-0.20201107062900-4648915e8ccb/go.mod h1:LP+Y/IQegwY2Ae3fO9HwXswJxBhWFRHkN9Od3bqNcEY=
 github.com/james-antill/rename-on-close v0.0.0-20181008023607-cfbc20f39567 h1:wFc3/DX/8p5wHnY3cckwlD1sk5mqIWW0Lgg/UrE0R+Y=
 github.com/james-antill/rename-on-close v0.0.0-20181008023607-cfbc20f39567/go.mod h1:emgvc97Z5HXIZXkTB7qli0Bnl27qbthhAhlCRr9FtNc=
 github.com/jtolds/gls v4.20.0+incompatible h1:xdiiI2gbIgH/gLH7ADydsJ1uDOEzR8yvV7C0MuV77Wo=
