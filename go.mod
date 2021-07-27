@@ -12,7 +12,7 @@ require (
 	github.com/pkg/sftp v1.11.0
 	github.com/smartystreets/goconvey v1.6.4 // indirect
 	github.com/twmb/murmur3 v1.1.1
-	github.com/ulikunitz/xz v0.5.7
+	github.com/ulikunitz/xz v0.5.8
 	github.com/zeebo/blake3 v0.0.4
 	golang.org/x/crypto v0.0.0-20200221231518-2aa609cf4a9d
 	golang.org/x/sys v0.0.0-20200805065543-0cf7623e9dbd // indirect
