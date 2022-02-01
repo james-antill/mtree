@@ -622,6 +622,10 @@ func (r *MTnode) dpath(b *strings.Builder) {
 
 // Path gives the full path to the node
 func (r *MTnode) Path() string {
+	if r == nil {
+		panic("/(nil)")
+	}
+
 	if r.parent == nil {
 		return r.name
 	}
@@ -2381,14 +2385,15 @@ func main() {
 						dmt, err)
 					os.Exit(1)
 				}
-				if off != "" {
-					omtree, err = mtreeChdir(omtree, off)
-					if err != nil {
-						fmt.Fprintln(os.Stderr, "Can't find old off:",
-							"from:", omtree.Path(), err)
-						os.Exit(1)
-					}
+			}
+			if off != "" {
+				nomtree, err := mtreeChdir(omtree, off)
+				if err != nil {
+					// Fake an old dir. for the diff.
+					basename := path.Base(off)
+					nomtree = &MTnode{name: basename, isDir: true}
 				}
+				omtree = nomtree
 			}
 			break
 		}

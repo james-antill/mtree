@@ -138,6 +138,12 @@ func cbDiff(r1, r2 *MTnode, last []bool,
 }
 
 func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
+	// Chop the tree at the point we are showing the diff
+	opr1 := r1.parent
+	opr2 := r2.parent
+	r1.parent = nil
+	r2.parent = nil
+
 	cbDiff(r1, r2, nil, func(n *MTnode, cbT cbType, last []bool, on ...*MTnode) {
 		switch cbT {
 		case cbAdd:
@@ -155,4 +161,7 @@ func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
 			prntDiffMtree(w, n, tree, last, ui, " ", n.Size())
 		}
 	})
+	// Restore the parents (and be nil
+	r1.parent = opr1
+	r2.parent = opr2
 }
