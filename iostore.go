@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -75,9 +76,31 @@ func atoi(s string) (int64, error) {
 	return i64, err
 }
 
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return !errors.Is(err, os.ErrNotExist)
+}
+
 // MtreeFile loads an mtree from a file.
 func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 	file, err := os.Open(mfname)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) { // Check ends with .mtree?
+			return nil, err
+		}
+
+		switch {
+		case exists(mfname + ".gz"):
+			mfname += ".gz"
+		case exists(mfname + ".bz2"):
+			mfname += ".bz2"
+		case exists(mfname + ".xz"):
+			mfname += ".xz"
+		default:
+			return nil, err
+		}
+		file, err = os.Open(mfname)
+	}
 	if err != nil {
 		return nil, err
 	}
