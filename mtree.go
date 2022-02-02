@@ -1469,16 +1469,16 @@ func formatKB(i int64) string {
 	return formatFKB(float64(i))
 }
 
-func _muinb(ui bool, size int64) string {
+func _muinb(ui bool, size int64, max int) string {
 	if !ui {
-		return fmt.Sprintf("%d", size)
+		return fmt.Sprintf("%*d", max, size)
 	}
 	return formatKB(size)
 }
 
-func _muin(ui bool, size int64) string {
+func _muin(ui bool, size int64, max int) string {
 	if !ui {
-		return fmt.Sprintf("%d", size)
+		return fmt.Sprintf("%*d", max, size)
 	}
 	return formatK(size)
 }
@@ -1598,51 +1598,61 @@ func uiPath(r *MTnode, tree bool, last []bool) string {
 }
 
 func prntListMtree(w io.Writer, r *MTnode, tree bool, last []bool, ui bool,
-	sizePrefix string) {
+	sizePrefix string, max int) {
 	chksum := uiChecksum(r, ui)
 
 	fn := uiPath(r, tree, last)
 
-	if ui && r.IsDir() && r.parent != nil {
+	if r.IsDir() && r.parent != nil {
 		fn = fn + "/"
 	}
 
-	fmt.Fprintf(w, "%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size()), fn)
+	fmt.Fprintf(w, "%s %s%s %s\n", chksum, sizePrefix, _muinb(ui, r.Size(), max), fn)
 }
 
 func prntDiffMtree(w io.Writer, r *MTnode, tree bool, last []bool, ui bool,
-	sizePrefix string, osize int64) {
+	sizePrefix string, osize int64, max int) {
+	if max == 0 {
+		max = len(fmt.Sprintf("%d", r.Size()))
+	}
+
 	chksum := uiChecksum(r, ui)
 
 	fn := uiPath(r, tree, last)
 
-	if ui && r.IsDir() && r.parent != nil {
+	if r.IsDir() && r.parent != nil {
 		fn = fn + "/"
 	}
 
 	dsize := " "
 	if ui {
 		dsize = "     "
+	} else if max > 0 {
+		dsize = fmt.Sprintf("%*s", max, "")
 	}
 
 	nsize := r.Size()
 	if nsize == osize {
-		fmt.Fprintf(w, "%s %s%s  %s%s\n", chksum, sizePrefix, _muinb(ui, nsize),
+		fmt.Fprintf(w, "%s %s%s  %s%s\n", chksum, sizePrefix, _muinb(ui, nsize, max),
 			dsize, fn)
 	} else if nsize >= osize {
-		fmt.Fprintf(w, "%s %s%s+%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
-			_muinb(ui, nsize-osize), fn)
+		fmt.Fprintf(w, "%s %s%s+%s %s\n", chksum, sizePrefix, _muinb(ui, nsize, max),
+			_muinb(ui, nsize-osize, max), fn)
 	} else {
-		fmt.Fprintf(w, "%s %s%s-%s %s\n", chksum, sizePrefix, _muinb(ui, nsize),
-			_muinb(ui, osize-nsize), fn)
+		fmt.Fprintf(w, "%s %s%s-%s %s\n", chksum, sizePrefix, _muinb(ui, nsize, max),
+			_muinb(ui, osize-nsize, max), fn)
 	}
 }
 
 func prntListMtreed(w io.Writer, r *MTnode, tree bool, last []bool,
-	ui, showChildren, recurse bool, sizePrefix string) {
+	ui, showChildren, recurse bool, sizePrefix string, max int) {
+	if max == 0 {
+		max = len(fmt.Sprintf("%d", r.Size()))
+	}
+
 	leafOnly := false
 	if !leafOnly || !r.IsDir() || len(r.children) == 0 {
-		prntListMtree(w, r, tree, last, ui, sizePrefix)
+		prntListMtree(w, r, tree, last, ui, sizePrefix, max)
 	}
 
 	if !r.IsDir() || !showChildren {
@@ -1658,7 +1668,7 @@ func prntListMtreed(w io.Writer, r *MTnode, tree bool, last []bool,
 		if i == num-1 {
 			nlast[len(nlast)-1] = true
 		}
-		prntListMtreed(w, c, tree, nlast, ui, recurse, recurse, sizePrefix)
+		prntListMtreed(w, c, tree, nlast, ui, recurse, recurse, sizePrefix, max)
 	}
 }
 
@@ -1669,9 +1679,9 @@ func prntInfoMtreeIn(w io.Writer, node *MTnode, cachingData, ui bool,
 	// p := message.NewPrinter(message.MatchLanguage("en"))
 	// p.Println("  Num     :", m.Num())
 	if node.IsDir() {
-		fmt.Fprintln(w, "  Num     :", _muin(ui, int64(node.Num())))
+		fmt.Fprintln(w, "  Num     :", _muin(ui, int64(node.Num()), 0))
 	}
-	fmt.Fprintln(w, "  Size    :", _muinb(ui, node.Size()))
+	fmt.Fprintln(w, "  Size    :", _muinb(ui, node.Size(), 0))
 	if cachingData {
 		timeFmt := time.RFC3339Nano
 		if ui { // Similar, but with spaces...
@@ -2425,9 +2435,9 @@ func main() {
 
 	switch cmdID {
 	case cmdList:
-		prntListMtreed(fow, mtree, false, nil, flagUI, true, flagRecurse, "")
+		prntListMtreed(fow, mtree, false, nil, flagUI, true, flagRecurse, "", 0)
 	case cmdTree:
-		prntListMtreed(fow, mtree, true, nil, flagUI, true, true, "")
+		prntListMtreed(fow, mtree, true, nil, flagUI, true, true, "", 0)
 	case cmdInfo:
 		prntInfoMtreed(fow, mtree, cachingData, flagUI, true, flagRecurse)
 	case cmdSummary:

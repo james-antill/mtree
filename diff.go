@@ -144,21 +144,27 @@ func prntDiff(w io.Writer, r1, r2 *MTnode, tree, ui bool) {
 	r1.parent = nil
 	r2.parent = nil
 
+	max1 := len(fmt.Sprintf("%d", r1.Size()))
+	max2 := len(fmt.Sprintf("%d", r2.Size()))
+	if max2 > max1 {
+		max1 = max2
+	}
+
 	cbDiff(r1, r2, nil, func(n *MTnode, cbT cbType, last []bool, on ...*MTnode) {
 		switch cbT {
 		case cbAdd:
-			prntDiffMtree(w, n, tree, last, ui, "+", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, "+", n.Size(), max1)
 		case cbDel:
-			prntDiffMtree(w, n, tree, last, ui, "-", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, "-", n.Size(), max1)
 		case cbMod:
 			if false {
-				prntListMtree(w, on[0], tree, last, ui, "-")
-				prntListMtree(w, n, tree, last, ui, "+")
+				prntListMtree(w, on[0], tree, last, ui, "-", max1)
+				prntListMtree(w, n, tree, last, ui, "+", max1)
 			} else {
-				prntDiffMtree(w, n, tree, last, ui, "!", on[0].Size())
+				prntDiffMtree(w, n, tree, last, ui, "!", on[0].Size(), max1)
 			}
 		case cbEqual:
-			prntDiffMtree(w, n, tree, last, ui, " ", n.Size())
+			prntDiffMtree(w, n, tree, last, ui, " ", n.Size(), max1)
 		}
 	})
 	// Restore the parents (and be nil
