@@ -1,6 +1,6 @@
 #!/bin/bash
 
-GOversion=1.15.4
+GOversion=1.17.6
 
 go tool dist list >/dev/null || {
     echo 1>&2 "go tool dist list not supported - can't check compile"
