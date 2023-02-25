@@ -15,6 +15,6 @@ require (
 	github.com/ulikunitz/xz v0.5.7
 	github.com/zeebo/blake3 v0.0.4
 	golang.org/x/crypto v0.0.0-20200221231518-2aa609cf4a9d
-	golang.org/x/sys v0.0.0-20200805065543-0cf7623e9dbd // indirect
+	golang.org/x/sys v0.1.0 // indirect
 	gopkg.in/ini.v1 v1.52.0
 )
