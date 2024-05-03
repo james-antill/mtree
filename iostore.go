@@ -113,6 +113,7 @@ func MtreeFile(mfname string, progress bool) (*MTnode, error) {
 
 	zr, err := autounzip(file, npath)
 	if err != nil {
+		return nil, err
 	}
 	defer zr.Close()
 
